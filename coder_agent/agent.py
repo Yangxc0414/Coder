@@ -126,12 +126,26 @@ class Agent:
             messages=self.messages,
             tools=self.registry.list_tools(),
         )
+        # Build assistant message in the format the API expects.
+        # Some providers (e.g. Agnes) require tool_calls to include
+        # "type": "function" and an "index" field.
         msg: dict[str, Any] = {
             "role": "assistant",
-            "content": response.content,
+            "content": response.content or "",
         }
         if response.tool_calls:
-            msg["tool_calls"] = response.tool_calls
+            msg["tool_calls"] = [
+                {
+                    "id": tc["id"],
+                    "type": "function",
+                    "index": i,
+                    "function": {
+                        "name": tc["name"],
+                        "arguments": tc["arguments"],
+                    },
+                }
+                for i, tc in enumerate(response.tool_calls)
+            ]
         self.messages.append(msg)
         return response
 

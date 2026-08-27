@@ -8,6 +8,8 @@ Design inspired by mini-swe-agent's parse_toolcall_actions:
 
 from __future__ import annotations
 
+import json
+
 from .parser_error import FormatError
 from .parsed_call import ParsedToolCall
 
