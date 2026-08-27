@@ -7,6 +7,12 @@ import logging
 import os
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from coder_agent.agent import Agent
 from coder_agent.llm.client import LLMClient
 from coder_agent.tools.filesystem import ListFilesTool, ReadFileTool, WriteFileTool
