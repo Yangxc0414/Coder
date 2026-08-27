@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coder-agent"
+version = "0.1.0"
+description = "A minimal coding agent with self-implemented ReAct loop"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+    "openai>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4.0"]
+
+[project.scripts]
+coder = "coder_agent.main:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

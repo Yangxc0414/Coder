@@ -1,0 +1,5 @@
+Fix the bug in tasks/bug_fix/calculator.py:
+the divide() function returns None when dividing by zero,
+but it should raise a ZeroDivisionError instead.
+After fixing, run the tests in tasks/bug_fix/test_calculator.py
+and confirm all tests pass.

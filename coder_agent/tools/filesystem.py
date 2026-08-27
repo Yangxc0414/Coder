@@ -1,0 +1,137 @@
+"""Filesystem tools: read_file, write_file, list_files."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from .base import Tool, ToolResult
+
+
+class ReadFileTool(Tool):
+    name = "read_file"
+    description = (
+        "Read the contents of a text file from the workspace. "
+        "Returns the full file content as a string."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "File path, relative to workspace root",
+            }
+        },
+        "required": ["path"],
+    }
+
+    def __init__(self, workspace: Path) -> None:
+        self.workspace = Path(workspace).resolve()
+
+    def execute(self, args: dict[str, str]) -> ToolResult:
+        try:
+            resolved = self._resolve_path(args["path"])
+            if not resolved.exists():
+                return ToolResult(error=f"File not found: {resolved}")
+            content = resolved.read_text(encoding="utf-8")
+            return ToolResult(output=content)
+        except Exception as e:
+            return ToolResult(error=f"read_file failed: {e}")
+
+    def _resolve_path(self, path_str: str) -> Path:
+        raw = Path(path_str)
+        resolved = (self.workspace / raw).resolve()
+        if not str(resolved).startswith(str(self.workspace)):
+            raise PermissionError(
+                f"Path escapes workspace: {path_str}"
+            )
+        return resolved
+
+
+class WriteFileTool(Tool):
+    name = "write_file"
+    description = (
+        "Write content to a file in the workspace. "
+        "Creates the file if it doesn't exist, overwrites if it does. "
+        "Creates parent directories as needed."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "File path, relative to workspace root",
+            },
+            "content": {
+                "type": "string",
+                "description": "Content to write",
+            },
+        },
+        "required": ["path", "content"],
+    }
+
+    def __init__(self, workspace: Path) -> None:
+        self.workspace = Path(workspace).resolve()
+
+    def execute(self, args: dict[str, str]) -> ToolResult:
+        try:
+            resolved = self._resolve_path(args["path"])
+            resolved.parent.mkdir(parents=True, exist_ok=True)
+            resolved.write_text(args["content"], encoding="utf-8")
+            return ToolResult(
+                output=f"Written {len(args['content'])} characters to {resolved.name}"
+            )
+        except Exception as e:
+            return ToolResult(error=f"write_file failed: {e}")
+
+    def _resolve_path(self, path_str: str) -> Path:
+        raw = Path(path_str)
+        resolved = (self.workspace / raw).resolve()
+        if not str(resolved).startswith(str(self.workspace)):
+            raise PermissionError(
+                f"Path escapes workspace: {path_str}"
+            )
+        return resolved
+
+
+class ListFilesTool(Tool):
+    name = "list_files"
+    description = (
+        "List all files and directories in the workspace recursively. "
+        "Paths are relative to the workspace root."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Subdirectory to list (default: root)",
+                "default": ".",
+            }
+        },
+        "required": [],
+    }
+
+    def __init__(self, workspace: Path) -> None:
+        self.workspace = Path(workspace).resolve()
+
+    def execute(self, args: dict[str, str]) -> ToolResult:
+        try:
+            target = self._resolve_path(args.get("path", "."))
+            entries = sorted(
+                str(p.relative_to(self.workspace))
+                for p in target.rglob("*")
+            )
+            return ToolResult(
+                output="\n".join(entries) if entries else "(directory is empty)"
+            )
+        except Exception as e:
+            return ToolResult(error=f"list_files failed: {e}")
+
+    def _resolve_path(self, path_str: str) -> Path:
+        raw = Path(path_str)
+        resolved = (self.workspace / raw).resolve()
+        if not str(resolved).startswith(str(self.workspace)):
+            raise PermissionError(
+                f"Path escapes workspace: {path_str}"
+            )
+        return resolved

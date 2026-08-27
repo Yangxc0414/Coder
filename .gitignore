@@ -1,0 +1,17 @@
+# 题目要求文档，涉及题目内容，严禁提交至仓库，防止题目泄密
+题目要求.md
+
+# 设计文档和调研笔记（仅本地参考，不入库）
+doc/
+*.md
+!README.md
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+env/
+
+# 环境变量
+.env
