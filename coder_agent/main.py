@@ -80,6 +80,9 @@ def main() -> None:
     parser.add_argument("--resume", type=str,
                         help="Restore a session from a journal file and continue it "
                              "(task argument becomes the continuation instruction)")
+    parser.add_argument("--token-budget", type=int, default=None,
+                        help="Max total tokens (prompt+completion) for the whole run; "
+                             "on exhaustion the agent wraps up and stops (default: unlimited)")
     parser.add_argument("--inspect", action="store_true",
                         help="Show context configuration and exit")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
@@ -176,6 +179,7 @@ def main() -> None:
         llm_verifier_mode=args.llm_verifier_mode,
         llm_verifier_model=args.llm_verifier_model,
         journal=journal,
+        token_budget=args.token_budget,
     )
 
     if args.resume:

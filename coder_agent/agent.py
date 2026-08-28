@@ -103,6 +103,7 @@ class Agent:
         llm_verifier_model: str = "gemini-2.5-flash",
         max_steps: int = MAX_STEPS,
         journal: "SessionJournal | None" = None,
+        token_budget: int | None = None,
     ) -> None:
         self.llm = llm_client
         self.registry = registry
@@ -118,6 +119,9 @@ class Agent:
         self.mode = mode
         self._max_steps = max_steps
         self.journal = journal
+        self._token_budget = token_budget
+        self._tokens_used = 0
+        self._budget_notice_given = False
         self.inspector = ContextInspector()
         self.messages: list[dict] = []
         self._n_steps = 0
@@ -179,6 +183,8 @@ class Agent:
         self._candidate_answers = []
         self._llm_warned = False
         self._n_mutations = 0
+        self._tokens_used = 0
+        self._budget_notice_given = False
         # 0, not None: a failed check with zero mutations means the failure
         # predates this task (pre-existing broken tests) — never retry it.
         self._verify_snapshot: int = 0
@@ -191,11 +197,57 @@ class Agent:
 
             try:
                 response = self._query_llm()
+
+                # Cumulative token accounting (getattr: tolerate duck-typed
+                # LLM responses, e.g. test doubles without usage)
+                usage = getattr(response, "usage", None) or {}
+                self._tokens_used += int(usage.get("prompt_tokens") or 0) + int(
+                    usage.get("completion_tokens") or 0
+                )
+
                 self.trace.record(
                     self._n_steps, "llm_response",
                     has_tool_calls=response.tool_calls is not None,
                     finish_reason=response.finish_reason,
+                    tokens_used=self._tokens_used,
                 )
+
+                # Token budget: one wrap-up round, then a hard stop.
+                # The three ways an agent runs away — too many steps, too
+                # many tokens, refusing to accept completion — each get
+                # their own gate (MAX_STEPS / token_budget / verify-gating).
+                over_budget = (
+                    self._token_budget is not None
+                    and self._tokens_used >= self._token_budget
+                )
+                if over_budget and not self._budget_notice_given:
+                    self._budget_notice_given = True
+                    logger.warning(
+                        "Token budget %d exhausted (used %d) — requesting wrap-up",
+                        self._token_budget, self._tokens_used,
+                    )
+                    self.trace.record(
+                        self._n_steps, "budget_exhausted",
+                        tokens_used=self._tokens_used, budget=self._token_budget,
+                    )
+                    self._append_message({
+                        "role": "user",
+                        "content": (
+                            "Token budget exhausted. Stop calling tools and give a "
+                            "final answer summarizing what was accomplished and what "
+                            "remains."
+                        ),
+                    })
+                    continue
+                if over_budget:
+                    # Wrap-up round already granted — hard stop even if the
+                    # model tried to call more tools.
+                    answer = response.content or "(no content)"
+                    self.trace.record(
+                        self._n_steps, "budget_terminated",
+                        tokens_used=self._tokens_used,
+                    )
+                    return answer
 
                 if not response.tool_calls:
                     answer = response.content or "(no content)"

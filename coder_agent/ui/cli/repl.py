@@ -73,6 +73,7 @@ class CoderRepl:
         mode: AgentMode = AgentMode.GOAL,
         max_tokens: int = 8000,
         keep_rounds: int = 6,
+        token_budget: int | None = None,
     ) -> None:
         self.workspace = workspace.resolve()
         self.model = model
@@ -80,6 +81,7 @@ class CoderRepl:
         self.mode = mode
         self.max_tokens = max_tokens
         self.keep_rounds = keep_rounds
+        self.token_budget = token_budget
 
         self.state = CliState(
             workspace=self.workspace,
@@ -114,6 +116,7 @@ class CoderRepl:
             verifier=verifier,
             mode=self.mode,
             journal=journal,
+            token_budget=self.token_budget,
         )
         return agent
 
@@ -427,6 +430,8 @@ def main() -> int:
     parser.add_argument("--base-url", default=None, help="API base URL")
     parser.add_argument("--mode", default="goal", choices=["goal", "plan", "dry-run", "full"])
     parser.add_argument("--max-tokens", type=int, default=8000)
+    parser.add_argument("--token-budget", type=int, default=None,
+                        help="Max total tokens per run; agent wraps up when exhausted")
     parser.add_argument("--batch", action="store_true", help="Batch mode (read from stdin)")
     args = parser.parse_args()
 
@@ -437,6 +442,7 @@ def main() -> int:
         base_url=args.base_url,
         mode=AgentMode(args.mode),
         max_tokens=args.max_tokens,
+        token_budget=args.token_budget,
     )
     return repl.run()
 
