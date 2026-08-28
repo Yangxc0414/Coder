@@ -31,7 +31,7 @@ class PolicyGate:
     """
 
     # Directly allowed tools
-    ALLOW_LIST = frozenset({"read_file", "list_files"})
+    ALLOW_LIST = frozenset({"read_file", "list_files", "search_text"})
 
     # Tools that are allowed but should be logged
     LOG_LIST = frozenset({"write_file"})

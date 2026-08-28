@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from .context import ContextManager
 from .llm.client import LLMClient, LLMResponse
 from .llm.parser import FormatError, parse_tool_calls
 from .policy import PolicyGate, PolicyResult
@@ -63,11 +64,13 @@ class Agent:
         registry: ToolRegistry,
         workspace: Path,
         policy_gate: PolicyGate | None = None,
+        context_manager: ContextManager | None = None,
     ) -> None:
         self.llm = llm_client
         self.registry = registry
         self.workspace = Path(workspace).resolve()
         self.policy = policy_gate or PolicyGate()
+        self.context = context_manager or ContextManager()
         self.messages: list[dict] = []
         self._n_steps = 0
         self._n_format_errors = 0
@@ -126,8 +129,14 @@ class Agent:
         return "Agent reached maximum steps without completing the task."
 
     def _query_llm(self) -> LLMResponse:
+        # Build context-bounded message list
+        system_prompt = _build_system_prompt(
+            self.registry.list_tools(), str(self.workspace)
+        )
+        messages_for_api = self.context.build_messages(system_prompt, self.messages)
+
         response = self.llm.chat(
-            messages=self.messages,
+            messages=messages_for_api,
             tools=self.registry.list_tools(),
         )
         # Build assistant message in the format the API expects.

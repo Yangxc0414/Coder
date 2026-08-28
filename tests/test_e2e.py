@@ -31,6 +31,7 @@ from coder_agent.agent import Agent
 from coder_agent.llm.client import LLMClient
 from coder_agent.tools.filesystem import ListFilesTool, ReadFileTool, WriteFileTool
 from coder_agent.tools.registry import ToolRegistry
+from coder_agent.tools.search import SearchTextTool
 from coder_agent.tools.shell import RunCommandTool
 
 
@@ -40,6 +41,7 @@ def make_agent(workspace: Path) -> Agent:
     registry.register(ReadFileTool(workspace))
     registry.register(WriteFileTool(workspace))
     registry.register(ListFilesTool(workspace))
+    registry.register(SearchTextTool(workspace))
     registry.register(RunCommandTool(workspace))
 
     llm = LLMClient(
