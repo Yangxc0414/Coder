@@ -11,8 +11,10 @@ Inspired by OneCode's InlineRepl pattern:
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,12 @@ from rich.text import Text
 from coder_agent.agent import Agent
 from coder_agent.context import ContextManager
 from coder_agent.inspector import ContextInspector
+from coder_agent.journal import (
+    DEFAULT_RESUME_PROMPT,
+    SessionJournal,
+    load_journal,
+    replay_state,
+)
 from coder_agent.llm.client import LLMClient
 from coder_agent.mode import AgentMode, MODE_DESCRIPTIONS
 from coder_agent.tools.registry import create_default_registry
@@ -87,7 +95,7 @@ class CoderRepl:
         self._agent: Agent | None = None
         self._session_id: int = 0
 
-    def _build_agent(self, task: str) -> Agent:
+    def _build_agent(self, task: str, journal=None) -> Agent:
         """Build a fresh Agent for a task."""
         self._session_id += 1
         registry = create_default_registry(self.workspace, self.mode)
@@ -105,8 +113,14 @@ class CoderRepl:
             ),
             verifier=verifier,
             mode=self.mode,
+            journal=journal,
         )
         return agent
+
+    def _next_session_path(self) -> Path:
+        session_dir = Path.home() / ".coder_sessions"
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        return session_dir / f"session_{stamp}_{self._session_id}.jsonl"
 
     def _print_header(self) -> None:
         """Print session header."""
@@ -143,7 +157,9 @@ class CoderRepl:
         """Show available commands."""
         help_text = """
 [bold yellow]Available Commands:[/bold yellow]
-  [cyan]/run <task>[/cyan]     Run agent on a task
+  [cyan]/run <task>[/cyan]     Run agent on a task (journaled for later /resume)
+  [cyan]/resume <file>[/cyan]  Restore a journaled session and continue it
+  [cyan]/sessions[/cyan]       List journaled sessions
   [cyan]/mode <name>[/cyan]     Switch mode: goal / plan / dry-run / full (next /run)
   [cyan]/status[/cyan]          Show context status
   [cyan]/tools[/cyan]           List tools available to the model
@@ -229,20 +245,82 @@ class CoderRepl:
                 self._console.print("[red]Usage: /run <task description>[/red]")
             else:
                 self._run_task(arg)
+        elif cmd == "/resume":
+            if not arg:
+                self._console.print("[red]Usage: /resume <journal.jsonl> [continuation instruction][/red]")
+            else:
+                parts = arg.split(maxsplit=1)
+                path = parts[0]
+                instruction = parts[1] if len(parts) > 1 else DEFAULT_RESUME_PROMPT
+                self._run_resumed(path, instruction)
+        elif cmd == "/sessions":
+            session_dir = Path.home() / ".coder_sessions"
+            files = sorted(session_dir.glob("session_*.jsonl"), reverse=True) if session_dir.exists() else []
+            if not files:
+                self._console.print("[dim]No journaled sessions yet (they are created per /run).[/dim]")
+            else:
+                self._console.print("[bold]Journaled sessions (newest first):[/bold]")
+                for f in files[:10]:
+                    size = f.stat().st_size
+                    self._console.print(f"  {f}  ({size} bytes)  → /resume {f}")
         else:
             self._console.print(f"[red]Unknown command: {cmd}. Type /help for usage.[/red]")
         return True
 
     def _run_task(self, task: str) -> None:
-        """Run the agent on a task."""
+        """Run the agent on a task, journaling every message for /resume."""
         self._console.print(f"[bold cyan]→ {task}[/bold cyan]")
         self._console.print()
 
-        agent = self._build_agent(task)
+        journal = SessionJournal(self._next_session_path())
+        agent = self._build_agent(task, journal=journal)
 
-        # Live progress feedback — without this the user stares at a
-        # silent screen for the whole run (logging hooks go to the
-        # logger, which is silent in the REPL).
+        try:
+            self._execute_run(agent, task)
+        finally:
+            journal.close()
+        self._console.print(
+            f"[dim]Session journaled: {journal.path} — use /resume {journal.path} to continue it later[/dim]"
+        )
+
+    def _run_resumed(self, path: str, instruction: str) -> None:
+        """Restore a session journal and continue it (append to same file)."""
+        try:
+            restored = load_journal(path)
+        except (OSError, json.JSONDecodeError) as e:
+            self._console.print(f"[red]✗ Cannot load journal {path}: {e}[/red]")
+            return
+        if not restored["messages"]:
+            self._console.print(f"[red]✗ Journal has no messages: {path}[/red]")
+            return
+
+        journal = SessionJournal(path, append=True)
+        agent = self._build_agent(instruction, journal=journal)
+        agent.messages = restored["messages"]
+        replay_state(restored["messages"], agent.state)
+        for m in restored["messages"]:
+            if m.get("role") == "user":
+                agent.state.task_goal = (m.get("content") or "")[:200]
+                break
+
+        self._console.print(
+            f"[green]✓ Restored {len(restored['messages'])} messages from {path}[/green]"
+        )
+        if agent.state.modified_files:
+            self._console.print(
+                f"[dim]Modified so far: {', '.join(agent.state.modified_files)}[/dim]"
+            )
+        self._console.print(f"[bold cyan]→ {instruction}[/bold cyan]")
+        self._console.print()
+
+        try:
+            self._execute_run(agent, instruction, resume=True)
+        finally:
+            journal.close()
+
+    def _execute_run(self, agent: Agent, task: str, resume: bool = False) -> None:
+        """Run the agent with live progress feedback and result panels."""
+
         def _on_post_tool(event) -> None:
             tool = event.data.get("tool_name", "?")
             mark = "[green]✓[/green]" if event.data.get("success") else "[red]✗[/red]"
@@ -255,7 +333,7 @@ class CoderRepl:
         agent.hooks.register("TURN_STOPPED", _on_turn)
 
         try:
-            answer = agent.run(task)
+            answer = agent.run(task, resume=resume)
             self.state.steps = agent.state.step
             self.state.last_answer = answer
             self.state.messages = agent.messages

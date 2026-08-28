@@ -17,6 +17,7 @@ except ImportError:
 from coder_agent.agent import Agent
 from coder_agent.context import ContextManager
 from coder_agent.inspector import ContextInspector
+from coder_agent.journal import DEFAULT_RESUME_PROMPT, SessionJournal, load_journal, replay_state
 from coder_agent.llm.client import LLMClient
 from coder_agent.mode import AgentMode, MODE_DESCRIPTIONS
 from coder_agent.tools.registry import create_default_registry
@@ -74,6 +75,11 @@ def main() -> None:
     parser.add_argument("--keep-rounds", type=int, default=6,
                         help="Recent rounds to keep full (default: 6)")
     parser.add_argument("--trace-output", type=str, help="Path to save trace.jsonl")
+    parser.add_argument("--session-output", type=str,
+                        help="Journal every message to this JSONL file (enables /resume later)")
+    parser.add_argument("--resume", type=str,
+                        help="Restore a session from a journal file and continue it "
+                             "(task argument becomes the continuation instruction)")
     parser.add_argument("--inspect", action="store_true",
                         help="Show context configuration and exit")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
@@ -123,7 +129,7 @@ def main() -> None:
     task = args.task
     if args.task_file:
         task = Path(args.task_file).read_text(encoding="utf-8").strip()
-    if not task:
+    if not task and not args.resume:
         parser.error("Please provide a task (argument or --task-file)")
 
     mode = AgentMode(args.mode)
@@ -132,6 +138,13 @@ def main() -> None:
 
     llm = LLMClient(model=args.model, base_url=args.base_url)
 
+    if args.resume:
+        restored = load_journal(args.resume)
+        if not restored["messages"]:
+            parser.error(f"Journal has no messages: {args.resume}")
+        task = task or DEFAULT_RESUME_PROMPT
+        print(f"\nResuming session: {args.resume}")
+        print(f"Restored: {len(restored['messages'])} messages")
     print(f"\nTask: {task[:100]}{'...' if len(task) > 100 else ''}")
     print(f"Workspace: {workspace}")
     print(f"Model: {args.model}")
@@ -147,6 +160,12 @@ def main() -> None:
     print("=" * 60)
 
     trace_path = Path(args.trace_output) if args.trace_output else None
+    journal = None
+    if args.resume:
+        journal = SessionJournal(args.resume, append=True)
+    elif args.session_output:
+        journal = SessionJournal(args.session_output)
+
     agent = Agent(
         llm_client=llm, registry=registry, workspace=workspace,
         trace_output=trace_path, mode=mode,
@@ -156,8 +175,24 @@ def main() -> None:
         verifier=Verifier(workspace, task=task),
         llm_verifier_mode=args.llm_verifier_mode,
         llm_verifier_model=args.llm_verifier_model,
+        journal=journal,
     )
-    result = agent.run(task)
+
+    if args.resume:
+        agent.messages = restored["messages"]
+        replay_state(restored["messages"], agent.state)
+        for m in restored["messages"]:
+            if m.get("role") == "user":
+                agent.state.task_goal = (m.get("content") or "")[:200]
+                break
+        if agent.state.modified_files:
+            print(f"Modified so far: {', '.join(agent.state.modified_files)}")
+
+    try:
+        result = agent.run(task, resume=bool(args.resume))
+    finally:
+        if journal:
+            journal.close()
 
     print("\n" + "=" * 60)
     agent.inspector.print_status(agent.messages)

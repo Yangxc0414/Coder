@@ -24,6 +24,12 @@ from typing import Any
 
 from .state import AgentState
 
+# Used when resuming without an explicit continuation instruction.
+DEFAULT_RESUME_PROMPT = (
+    "The previous session was interrupted. Review the conversation above "
+    "and continue the task from where it stopped."
+)
+
 
 class SessionJournal:
     """Writes one JSONL line per agent message, plus meta/end events.
