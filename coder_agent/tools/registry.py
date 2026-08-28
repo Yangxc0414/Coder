@@ -54,8 +54,14 @@ class ToolRegistry:
         return name in self._tools
 
 
-def create_default_registry(workspace, mode) -> ToolRegistry:
+def create_default_registry(workspace, mode, with_extensions: bool = True) -> ToolRegistry:
     """Create a registry with standard tools for the given workspace and mode.
+
+    Args:
+        workspace: Project root the tools operate on.
+        mode: AgentMode — DRY_RUN makes write_file non-destructive.
+        with_extensions: Also register MCP tools (git/system/debug) and
+            built-in Skills, so the extension system is reachable by the model.
 
     Usage:
         from coder_agent.tools.registry import create_default_registry
@@ -76,4 +82,14 @@ def create_default_registry(workspace, mode) -> ToolRegistry:
     registry.register(ListFilesTool(workspace_path))
     registry.register(SearchTextTool(workspace_path))
     registry.register(RunCommandTool(workspace_path))
+
+    if with_extensions:
+        from coder_agent.extensions.mcp.builtins import create_builtin_mcp_tools
+        from coder_agent.extensions.skills.builtin import get_builtin_skills
+
+        for mcp_tool in create_builtin_mcp_tools(workspace_path):
+            registry.register(mcp_tool)
+        for skill in get_builtin_skills():
+            registry.register(skill)
+
     return registry

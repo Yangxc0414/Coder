@@ -25,6 +25,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from coder_agent.agent import Agent
+from coder_agent.context import ContextManager
 from coder_agent.inspector import ContextInspector
 from coder_agent.llm.client import LLMClient
 from coder_agent.mode import AgentMode, MODE_DESCRIPTIONS
@@ -99,6 +100,9 @@ class CoderRepl:
             registry=registry,
             workspace=self.workspace,
             trace_output=None,
+            context_manager=ContextManager(
+                max_tokens=self.max_tokens, keep_rounds=self.keep_rounds
+            ),
             verifier=verifier,
             mode=self.mode,
         )

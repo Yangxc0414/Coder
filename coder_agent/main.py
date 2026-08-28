@@ -15,10 +15,12 @@ except ImportError:
     pass
 
 from coder_agent.agent import Agent
+from coder_agent.context import ContextManager
 from coder_agent.inspector import ContextInspector
 from coder_agent.llm.client import LLMClient
 from coder_agent.mode import AgentMode, MODE_DESCRIPTIONS
 from coder_agent.tools.registry import create_default_registry
+from coder_agent.verifier import Verifier
 
 # Check llm-verifier availability at startup
 try:
@@ -133,6 +135,10 @@ def main() -> None:
     agent = Agent(
         llm_client=llm, registry=registry, workspace=workspace,
         trace_output=trace_path, mode=mode,
+        context_manager=ContextManager(
+            max_tokens=args.max_tokens, keep_rounds=args.keep_rounds
+        ),
+        verifier=Verifier(workspace, task=task),
         llm_verifier_mode=args.llm_verifier_mode,
         llm_verifier_model=args.llm_verifier_model,
     )
