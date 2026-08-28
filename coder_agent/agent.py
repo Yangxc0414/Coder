@@ -71,6 +71,10 @@ class Agent:
         self.workspace = Path(workspace).resolve()
         self.policy = policy_gate or PolicyGate()
         self.context = context_manager or ContextManager()
+        # Build system prompt once at initialization (not per-step)
+        self._system_prompt = _build_system_prompt(
+            registry.list_tools(), str(workspace)
+        )
         self.messages: list[dict] = []
         self._n_steps = 0
         self._n_format_errors = 0
@@ -79,9 +83,7 @@ class Agent:
     def run(self, task: str) -> str:
         """Run the agent on a programming task. Returns the final answer."""
         self.messages = [
-            {"role": "system", "content": _build_system_prompt(
-                self.registry.list_tools(), str(self.workspace)
-            )},
+            {"role": "system", "content": self._system_prompt},
             {"role": "user", "content": task},
         ]
         self._n_steps = 0
@@ -129,11 +131,8 @@ class Agent:
         return "Agent reached maximum steps without completing the task."
 
     def _query_llm(self) -> LLMResponse:
-        # Build context-bounded message list
-        system_prompt = _build_system_prompt(
-            self.registry.list_tools(), str(self.workspace)
-        )
-        messages_for_api = self.context.build_messages(system_prompt, self.messages)
+        # Build context-bounded message list (system prompt is pre-built)
+        messages_for_api = self.context.build_messages(self._system_prompt, self.messages)
 
         response = self.llm.chat(
             messages=messages_for_api,

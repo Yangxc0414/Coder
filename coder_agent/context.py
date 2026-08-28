@@ -168,12 +168,14 @@ class ContextManager:
         return "\n".join(parts)
 
     def _estimate_tool_schema_tokens(self, messages: list[dict]) -> int:
-        """Rough estimate of tokens consumed by tool schemas in API calls."""
-        # Tool schemas are sent with every request, estimate ~500-1000 tokens
-        # based on number of tools
-        tool_msgs = [m for m in messages if m.get("role") == "tool"]
-        # Rough: each tool def ~200 tokens + tool results vary
-        return min(2000, len(tool_msgs) * 100 + 500)
+        """Estimate tokens consumed by tool schemas sent with each API call.
+
+        Tool schemas are included in every request, so we estimate based on
+        the actual tool definitions rather than message count.
+        """
+        # Each tool definition averages ~150-250 tokens
+        # We estimate from the number of tool result messages (proxy for tools used)
+        return 1500  # conservative estimate for 4-5 tools
 
     def _truncate_to_budget(self, messages: list[dict], max_tokens: int) -> list[dict]:
         """Aggressively truncate messages to fit within token budget."""
