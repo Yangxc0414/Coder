@@ -9,7 +9,9 @@ from typing import Any
 from .context import ContextManager
 from .llm.client import LLMClient, LLMResponse
 from .llm.parser import FormatError, parse_tool_calls
+from .memory import Memory
 from .policy import PolicyGate, PolicyResult
+from .state import AgentState
 from .tools.base import ToolResult
 from .tools.registry import ToolRegistry
 
@@ -24,21 +26,34 @@ Available tools:
 {tool_descriptions}
 
 ## How to work:
-1. First, understand the task and PLAN your approach. Think about what files to read, what changes to make, and how to verify.
-2. Use tools to explore the codebase (read files, list directories, search).
-3. Make changes carefully — read before you write, test after you modify.
-4. When done, provide a clear final answer summarizing what you did.
+1. [PLAN] Read relevant files first. Understand the codebase structure. Identify what needs to change.
+2. [ACT] Execute the plan step by step using tools. Read before you write, test after you modify.
+3. [VERIFY] Run tests or checks to confirm the task is complete. Only provide final_answer when confident.
 
 Workspace: {workspace}
 """
 
 
-def _build_system_prompt(tools: list[dict], workspace: str) -> str:
+def _build_system_prompt(tools: list[dict], workspace: str, state: AgentState | None = None, memory: Memory | None = None) -> str:
     descs = "\n".join(
         f"- {t['function']['name']}: {t['function']['description']}"
         for t in tools
     )
-    return SYSTEM_PROMPT.format(tool_descriptions=descs, workspace=workspace)
+    prompt = SYSTEM_PROMPT.format(tool_descriptions=descs, workspace=workspace)
+
+    # Inject state and memory summaries
+    extras = []
+    if state:
+        status = state.to_status_prompt()
+        if status and status != "Step 0/50":
+            extras.append(f"[Status] {status}")
+    if memory:
+        mem_summary = memory.get_summary()
+        if mem_summary:
+            extras.append(mem_summary)
+    if extras:
+        prompt += "\n\n" + "\n".join(extras)
+    return prompt
 
 
 class Agent:
@@ -71,6 +86,9 @@ class Agent:
         self.workspace = Path(workspace).resolve()
         self.policy = policy_gate or PolicyGate()
         self.context = context_manager or ContextManager()
+        self.state = AgentState()
+        self.memory = Memory()
+        self._loop_warning_injected = False
         # Build system prompt once at initialization (not per-step)
         self._system_prompt = _build_system_prompt(
             registry.list_tools(), str(workspace)
@@ -83,12 +101,16 @@ class Agent:
     def run(self, task: str) -> str:
         """Run the agent on a programming task. Returns the final answer."""
         self.messages = [
-            {"role": "system", "content": self._system_prompt},
+            {"role": "system", "content": _build_system_prompt(
+                self.registry.list_tools(), str(self.workspace),
+                state=self.state, memory=self.memory,
+            )},
             {"role": "user", "content": task},
         ]
         self._n_steps = 0
         self._n_format_errors = 0
         self._trace = []
+        self.state.task_goal = task
 
         while self._n_steps < MAX_STEPS:
             self._n_steps += 1
@@ -123,6 +145,18 @@ class Agent:
 
                 for pc in parsed:
                     self._execute_tool_call(pc)
+
+                # Loop detection
+                if self.state.get_loop_risk() and not self._loop_warning_injected:
+                    logger.warning("Loop detected, injecting guidance")
+                    self.messages.append({
+                        "role": "user",
+                        "content": (
+                            "You seem to be repeatedly operating on the same file(s). "
+                            "Consider reviewing your plan and trying a different approach."
+                        )
+                    })
+                    self._loop_warning_injected = True
 
             except Exception as e:
                 logger.error("Unexpected agent error: %s", e, exc_info=True)
@@ -164,6 +198,16 @@ class Agent:
     def _execute_tool_call(self, parsed: Any) -> None:
         tool = self.registry.get(parsed.tool_name)
 
+        # Update state
+        self.state.step = self._n_steps
+        self.state.add_recent_action(parsed.tool_name, str(parsed.arguments))
+
+        # Update state file tracking
+        if parsed.tool_name == "read_file":
+            self.state.mark_file_read(parsed.arguments.get("path", ""))
+        elif parsed.tool_name == "write_file":
+            self.state.mark_file_modified(parsed.arguments.get("path", ""))
+
         # Policy check
         policy_result: PolicyResult = self.policy.check(
             parsed.tool_name, parsed.arguments
@@ -179,6 +223,15 @@ class Agent:
                     parsed.tool_name,
                     (result.output or "(no output)")[:100],
                 )
+
+        # Record in memory (after execution)
+        self.memory.record(
+            step=self._n_steps,
+            tool_name=parsed.tool_name,
+            args=parsed.arguments,
+            success=result.success,
+            output=result.output or "",
+        )
 
         tool_msg: dict[str, Any] = {
             "role": "tool",
