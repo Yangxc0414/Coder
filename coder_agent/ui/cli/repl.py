@@ -28,10 +28,7 @@ from coder_agent.agent import Agent
 from coder_agent.inspector import ContextInspector
 from coder_agent.llm.client import LLMClient
 from coder_agent.mode import AgentMode, MODE_DESCRIPTIONS
-from coder_agent.tools.filesystem import ListFilesTool, ReadFileTool, WriteFileTool
-from coder_agent.tools.registry import ToolRegistry
-from coder_agent.tools.search import SearchTextTool
-from coder_agent.tools.shell import RunCommandTool
+from coder_agent.tools.registry import create_default_registry
 from coder_agent.trace import TraceRecorder
 from coder_agent.verifier import Verifier
 
@@ -47,7 +44,7 @@ class CliState:
     base_url: str | None
     trace_recorder: TraceRecorder
     context_inspector: ContextInspector
-    messages: list[dict] = None  # type: ignore
+    messages: list[dict] = None  # type: ignore[assignment]
     steps: int = 0
     last_answer: str = ""
 
@@ -92,13 +89,7 @@ class CoderRepl:
     def _build_agent(self, task: str) -> Agent:
         """Build a fresh Agent for a task."""
         self._session_id += 1
-        dry_run = (self.mode == AgentMode.DRY_RUN)
-        registry = ToolRegistry()
-        registry.register(ReadFileTool(self.workspace))
-        registry.register(WriteFileTool(self.workspace, dry_run=dry_run))
-        registry.register(ListFilesTool(self.workspace))
-        registry.register(SearchTextTool(self.workspace))
-        registry.register(RunCommandTool(self.workspace))
+        registry = create_default_registry(self.workspace, self.mode)
 
         llm = LLMClient(model=self.model, base_url=self.base_url)
         verifier = Verifier(self.workspace, task=task)
@@ -192,11 +183,15 @@ class CoderRepl:
                 except ValueError:
                     self._console.print(f"[red]✗ Unknown mode: {arg}. Use: goal, plan, dry-run, full[/red]")
         elif cmd == "/compact":
-            self._console.print("[dim]Context will be compressed on next turn.[/dim]")
-            # Force compression by clearing old messages
-            if len(self.state.messages) > 20:
-                self.state.messages = self.state.messages[-6:]
-                self._console.print(f"[green]✓ Compressed to {len(self.state.messages)} messages[/green]")
+            n = len(self.state.messages)
+            if n <= 2 * self.state.keep_rounds:
+                self._console.print("[dim]No compression needed ({n} messages, under threshold).[/dim]")
+            else:
+                # Keep system + recent rounds, drop older tool results
+                # Preserve the first message (system context placeholder) and last 2*keep_rounds
+                keep = max(2, self.state.keep_rounds * 2)
+                self.state.messages = self.state.messages[-keep:]
+                self._console.print(f"[green]✓ Compressed {n} → {len(self.state.messages)} messages[/green]")
         elif cmd == "/history":
             if self.state.messages:
                 self._console.print("[bold]Recent Messages:[/bold]")
@@ -250,6 +245,9 @@ class CoderRepl:
 
         except Exception as e:
             self._console.print(f"[red]❌ Error: {e}[/red]")
+            # Still sync what we can on error
+            self.state.steps = agent.state.step
+            self.state.messages = agent.messages
 
     def run(self) -> int:
         """Run the interactive REPL."""

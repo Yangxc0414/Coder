@@ -18,10 +18,14 @@ from coder_agent.agent import Agent
 from coder_agent.inspector import ContextInspector
 from coder_agent.llm.client import LLMClient
 from coder_agent.mode import AgentMode, MODE_DESCRIPTIONS
-from coder_agent.tools.filesystem import ListFilesTool, ReadFileTool, WriteFileTool
-from coder_agent.tools.registry import ToolRegistry
-from coder_agent.tools.search import SearchTextTool
-from coder_agent.tools.shell import RunCommandTool
+from coder_agent.tools.registry import create_default_registry
+
+# Check llm-verifier availability at startup
+try:
+    from coder_agent.verifier_llm import _import_llm_verifier
+    _LLM_VERIFIER_AVAILABLE = True
+except ImportError:
+    _LLM_VERIFIER_AVAILABLE = False
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -56,6 +60,23 @@ def main() -> None:
     parser.add_argument("--inspect", action="store_true",
                         help="Show context configuration and exit")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
+    parser.add_argument(
+        "--llm-verifier-mode",
+        choices=["off", "progress", "select", "full"],
+        default=os.getenv("LLM_VERIFIER_MODE", "off"),
+        help=(
+            "LLM verifier mode (requires pip install 'coder-agent[verifier]'):\n"
+            "  off      — disabled (default)\n"
+            "  progress — online per-step scoring via ProgressTracker\n"
+            "  select   — final best-of-N selection via llm_verifier.select()\n"
+            "  full     — both progress tracking + final selection"
+        ),
+    )
+    parser.add_argument(
+        "--llm-verifier-model",
+        default=os.getenv("LLM_VERIFIER_MODEL", "gemini-2.5-flash"),
+        help="Verifier model (default: gemini-2.5-flash, also supports deepseek-v4-flash)",
+    )
     args = parser.parse_args()
 
     if args.list_models:
@@ -89,15 +110,8 @@ def main() -> None:
         parser.error("Please provide a task (argument or --task-file)")
 
     mode = AgentMode(args.mode)
-    registry = ToolRegistry()
     workspace = Path(args.workspace).resolve()
-
-    dry_run = (mode == AgentMode.DRY_RUN)
-    registry.register(ReadFileTool(workspace))
-    registry.register(WriteFileTool(workspace, dry_run=dry_run))
-    registry.register(ListFilesTool(workspace))
-    registry.register(SearchTextTool(workspace))
-    registry.register(RunCommandTool(workspace))
+    registry = create_default_registry(workspace, mode)
 
     llm = LLMClient(model=args.model, base_url=args.base_url)
 
@@ -106,12 +120,21 @@ def main() -> None:
     print(f"Model: {args.model}")
     print(f"Mode: {mode.value} — {MODE_DESCRIPTIONS[mode]}")
     print(f"Context: max={args.max_tokens} tokens, keep={args.keep_rounds} rounds")
+
+    # LLM verifier status
+    if args.llm_verifier_mode != "off":
+        if _LLM_VERIFIER_AVAILABLE:
+            print(f"LLM Verifier: {args.llm_verifier_mode} (model={args.llm_verifier_model})")
+        else:
+            print("LLM Verifier: ⚠️  enabled but NOT installed — run: pip install 'coder-agent[verifier]'")
     print("=" * 60)
 
     trace_path = Path(args.trace_output) if args.trace_output else None
     agent = Agent(
         llm_client=llm, registry=registry, workspace=workspace,
         trace_output=trace_path, mode=mode,
+        llm_verifier_mode=args.llm_verifier_mode,
+        llm_verifier_model=args.llm_verifier_model,
     )
     result = agent.run(task)
 

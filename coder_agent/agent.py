@@ -20,6 +20,7 @@ from .recovery import RecoveryStrategy
 from .mode import AgentMode
 from .inspector import ContextInspector
 from .hooks import HookRegistry, install_logging_hooks, install_trace_hooks, PRE_TOOL_USE, POST_TOOL_USE, TURN_STOPPED, AGENT_STARTED, AGENT_ENDED
+from .extensions.base import SubagentRunner
 
 try:
     from .verifier_llm import ProgressTracker, select as llm_select
@@ -133,6 +134,12 @@ class Agent:
         self.hooks = HookRegistry()
         install_logging_hooks(self.hooks)
         install_trace_hooks(self.hooks, self.trace)
+
+        # Subagent runner
+        self.subagent_runner = SubagentRunner(parent_agent=self)
+        from coder_agent.extensions.subagents import get_builtin_subagents
+        for defn in get_builtin_subagents():
+            self.subagent_runner.register(defn)
 
     def run(self, task: str) -> str:
         """Run the agent on a programming task. Returns the final answer."""

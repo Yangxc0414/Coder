@@ -52,3 +52,28 @@ class ToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools
+
+
+def create_default_registry(workspace, mode) -> ToolRegistry:
+    """Create a registry with standard tools for the given workspace and mode.
+
+    Usage:
+        from coder_agent.tools.registry import create_default_registry
+        registry = create_default_registry("/path/to/project", AgentMode.FULL)
+    """
+    from pathlib import Path
+
+    workspace_path = Path(workspace).resolve()
+    dry_run = (mode.value == "dry-run")
+
+    from coder_agent.tools.filesystem import ListFilesTool, ReadFileTool, WriteFileTool
+    from coder_agent.tools.search import SearchTextTool
+    from coder_agent.tools.shell import RunCommandTool
+
+    registry = ToolRegistry()
+    registry.register(ReadFileTool(workspace_path))
+    registry.register(WriteFileTool(workspace_path, dry_run=dry_run))
+    registry.register(ListFilesTool(workspace_path))
+    registry.register(SearchTextTool(workspace_path))
+    registry.register(RunCommandTool(workspace_path))
+    return registry
