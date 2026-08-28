@@ -65,7 +65,9 @@ Type a task and press Enter to run the agent; progress prints live
 
 | Command | Action |
 |---|---|
-| `/run <task>` | Run the agent on a task |
+| `/run <task>` | Run the agent on a task (auto-journaled to `~/.coder_sessions/`) |
+| `/resume <file> [instruction]` | Restore a journaled session and continue it |
+| `/sessions` | List journaled sessions |
 | `/mode <name>` | Switch mode — applies to the next `/run` |
 | `/status` | Context usage: tokens / budget / rounds |
 | `/tools` | List tools the model can call (core / MCP / Skills) |
@@ -80,6 +82,27 @@ Paste into stdin (batch mode, no TTY needed):
 ```bash
 echo "/run List python files and summarize" | python -m coder_agent.ui.cli.repl
 ```
+
+### 3. Session resume — crash recovery
+
+Every `/run` (and every CLI run with `--session-output`) mirrors each message
+into an append-only JSONL journal. If the agent is interrupted (API drop,
+Ctrl+C, terminal closed), point a new session at the journal and it continues
+with the full prior conversation, state and file tracking rebuilt:
+
+```bash
+# CLI
+python -m coder_agent.main "task" --session-output session.jsonl   # ... interrupted!
+python -m coder_agent.main --resume session.jsonl                  # continue (default prompt)
+python -m coder_agent.main --resume session.jsonl "focus on the tests next"
+
+# REPL
+/run fix the calculator ...          # journaled automatically
+/resume ~/.coder_sessions/session_xxx.jsonl continue with the tests
+```
+
+The journal is chain-resumable: resuming appends to the same file, so an
+interrupted *recovery* can itself be recovered.
 
 ### Execution modes
 
