@@ -112,7 +112,11 @@ def install_logging_hooks(hooks: HookRegistry) -> None:
 def install_trace_hooks(hooks: HookRegistry, trace) -> None:
     """Install hooks that record events to the trace."""
     def _trace_event(event: HookEvent) -> None:
-        trace.record("hook", event_name=event.name, **event.data)
+        # trace.record signature is (step, event, **data); pull step out of
+        # the payload when present so it is not passed twice.
+        data = dict(event.data)
+        step = data.pop("step", 0)
+        trace.record(step, "hook", hook_event=event.name, **data)
 
     hooks.register("PRE_TOOL_USE", _trace_event)
     hooks.register("POST_TOOL_USE", _trace_event)
