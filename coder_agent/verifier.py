@@ -50,6 +50,30 @@ class Verifier:
         self._start_time = time.time()
         self._results: list[CheckResult] = []
 
+        # Baseline-diff state: failures that already existed BEFORE the task
+        # started must not count against it (real incident: a 2-step correct
+        # answer was flailed into a 50-step loop because the workspace had a
+        # pre-existing broken test the read-only agent could never fix).
+        self._baseline_test_failures: set[str] | None = None
+        self._baseline_syntax_errors: set[str] | None = None
+        self._last_test_failures: set[str] = set()
+        self._last_syntax_errors: set[str] = set()
+
+    def establish_baseline(self) -> tuple[int, int]:
+        """Run checks once BEFORE the task starts; record pre-existing failures.
+
+        After this call, check() only counts failures NEW relative to the
+        baseline — the verifier holds the task responsible for regressions
+        it introduces, not for the workspace's history.
+
+        Returns (baseline_failing_tests, baseline_syntax_error_files).
+        """
+        self._check_tests()
+        self._baseline_test_failures = set(self._last_test_failures)
+        self._check_syntax()
+        self._baseline_syntax_errors = set(self._last_syntax_errors)
+        return len(self._baseline_test_failures), len(self._baseline_syntax_errors)
+
     def check(self) -> tuple[bool, str]:
         """Run all checks and return (all_passed, summary)."""
         self._results = []
@@ -76,6 +100,7 @@ class Verifier:
         test_files = list(self.workspace.rglob("test_*.py"))
         if not test_files:
             # No tests to run — this is acceptable
+            self._last_test_failures = set()
             return CheckResult(
                 name="pytest",
                 passed=True,
@@ -84,7 +109,8 @@ class Verifier:
 
         try:
             result = subprocess.run(
-                [sys.executable, "-m", "pytest", str(test_files[0].parent), "-q", "--tb=short"],
+                [sys.executable, "-m", "pytest", str(test_files[0].parent),
+                 "-q", "--tb=short", "-rf"],
                 cwd=str(self.workspace),
                 capture_output=True,
                 text=True,
@@ -92,14 +118,50 @@ class Verifier:
                 encoding="utf-8",
                 errors="replace",
             )
-            passed = result.returncode == 0
+            # Parse failing test IDs from the short summary (-rf):
+            # "FAILED path::test_name - assertion detail..."
+            failing: set[str] = set()
+            for line in (result.stdout or "").splitlines():
+                if line.startswith("FAILED"):
+                    failing.add(line[len("FAILED"):].split(" - ")[0].strip())
+            self._last_test_failures = failing
+
+            if result.returncode == 0:
+                return CheckResult(
+                    name="pytest",
+                    passed=True,
+                    message="Tests passed",
+                )
+
+            if self._baseline_test_failures is not None:
+                new_failures = failing - self._baseline_test_failures
+                pre_existing = failing & self._baseline_test_failures
+                if not new_failures:
+                    return CheckResult(
+                        name="pytest",
+                        passed=True,  # filtered: nothing new broke
+                        message=(
+                            f"{len(failing)} test failure(s), all pre-existing "
+                            f"at baseline — no regressions introduced"
+                        ),
+                    )
+                return CheckResult(
+                    name="pytest",
+                    passed=False,
+                    message=(
+                        f"{len(new_failures)} NEW failing test(s) "
+                        f"({len(pre_existing)} pre-existing at baseline)"
+                    ),
+                    detail="\n".join(sorted(new_failures))[:500],
+                )
+
             output = result.stdout[-500:] if result.stdout else ""
             error = result.stderr[-200:] if result.stderr else ""
-            detail = output + error if not passed else ""
+            detail = output + error
             return CheckResult(
                 name="pytest",
-                passed=passed,
-                message=f"Tests {'passed' if passed else 'FAILED'}",
+                passed=False,
+                message=f"Tests FAILED ({len(failing)} failing)",
                 detail=detail,
             )
         except subprocess.TimeoutExpired:
@@ -135,11 +197,39 @@ class Verifier:
             except Exception as e:
                 errors.append(f"{py_file.relative_to(self.workspace)}: {e}")
 
-        passed = len(errors) == 0
+        self._last_syntax_errors = {
+            e.split(":", 1)[0] for e in errors
+        }
+
+        if not errors:
+            return CheckResult(
+                name="syntax",
+                passed=True,
+                message=f"{len(py_files)} files, 0 errors",
+            )
+
+        if self._baseline_syntax_errors is not None:
+            new_errors = self._last_syntax_errors - self._baseline_syntax_errors
+            if not new_errors:
+                return CheckResult(
+                    name="syntax",
+                    passed=True,  # filtered: no new syntax breakage
+                    message=(
+                        f"{len(errors)} syntax error file(s), all pre-existing "
+                        f"at baseline"
+                    ),
+                )
+            return CheckResult(
+                name="syntax",
+                passed=False,
+                message=f"{len(new_errors)} file(s) with NEW syntax errors",
+                detail="\n".join(sorted(new_errors))[:500],
+            )
+
         return CheckResult(
             name="syntax",
-            passed=passed,
-            message=f"{len(py_files)} files, {'0 errors' if passed else f'{len(errors)} error(s)'}",
+            passed=False,
+            message=f"{len(py_files)} files, {len(errors)} error(s)",
             detail="\n".join(errors[:5]) if errors else "",
         )
 

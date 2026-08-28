@@ -191,6 +191,27 @@ class Agent:
         if self._progress_tracker:
             self._progress_tracker.problem = task
 
+        # Baseline-diff verification: capture pre-existing failures BEFORE the
+        # task starts, so check() only holds the task responsible for
+        # regressions it introduces. (Mutation gating below then decides when
+        # a failed check is worth retrying.)
+        if self._verifier is not None:
+            establish = getattr(self._verifier, "establish_baseline", None)
+            if callable(establish):
+                try:
+                    n_fail, n_syn = establish()
+                    self.trace.record(
+                        0, "verifier_baseline",
+                        test_failures=n_fail, syntax_error_files=n_syn,
+                    )
+                    if n_fail or n_syn:
+                        logger.info(
+                            "Verifier baseline: %d pre-existing test failure(s), "
+                            "%d syntax-error file(s)", n_fail, n_syn,
+                        )
+                except Exception as e:
+                    logger.warning("Verifier baseline capture failed: %s", e)
+
         while self._n_steps < self._max_steps:
             self._n_steps += 1
             logger.info("=== Step %d ===", self._n_steps)
