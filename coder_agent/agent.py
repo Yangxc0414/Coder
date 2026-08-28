@@ -16,6 +16,7 @@ from .tools.base import ToolResult
 from .tools.registry import ToolRegistry
 from .trace import TraceRecorder
 from .verifier import Verifier
+from .recovery import RecoveryStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,7 @@ class Agent:
         self._loop_warning_injected = False
         self.trace = TraceRecorder(trace_output)
         self._verifier = verifier
+        self.recovery = RecoveryStrategy()
         self.messages: list[dict] = []
         self._n_steps = 0
         self._n_format_errors = 0
@@ -107,6 +109,7 @@ class Agent:
         self._n_steps = 0
         self._n_format_errors = 0
         self.state.task_goal = task
+        self.recovery.reset()
 
         while self._n_steps < MAX_STEPS:
             self._n_steps += 1
@@ -171,7 +174,26 @@ class Agent:
 
             except Exception as e:
                 logger.error("Unexpected agent error: %s", e, exc_info=True)
-                return f"Agent encountered an error: {e}"
+                # Attempt recovery
+                result = self.recovery.handle(e, self)
+                if result.recovered:
+                    if result.message:
+                        self.messages.append({
+                            "role": "user",
+                            "content": result.message,
+                        })
+                    self.trace.record(
+                        self._n_steps, "recovery",
+                        action=result.action, recovered=True,
+                    )
+                    continue
+                else:
+                    self.trace.record(
+                        self._n_steps, "recovery",
+                        action=result.action, recovered=False,
+                        message=result.message,
+                    )
+                    return f"Agent terminated: {result.action}. {result.message or ''}"
 
         return "Agent reached maximum steps without completing the task."
 
