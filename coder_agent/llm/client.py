@@ -51,6 +51,7 @@ class LLMClient:
         base_url: str | None = None,
     ) -> None:
         self.model = model
+        self.base_url = base_url or os.getenv("OPENAI_BASE_URL")
         client_kwargs: dict[str, Any] = {
             "api_key": api_key or os.getenv("OPENAI_API_KEY", ""),
         }

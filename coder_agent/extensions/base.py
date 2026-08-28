@@ -9,10 +9,23 @@ from typing import Any, Callable
 
 @dataclass
 class ExtensionResult:
-    """Result from an extension tool call."""
+    """Result from an extension tool call.
+
+    Mirrors ToolResult's interface (success / to_message_content) so
+    extension tools can flow through the ReAct loop unchanged.
+    """
     output: str = ""
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def success(self) -> bool:
+        return self.error is None
+
+    def to_message_content(self) -> str:
+        if self.error:
+            return f"(error) {self.error}"
+        return self.output or "(no output)"
 
 
 class ExtensionTool(ABC):
@@ -239,25 +252,21 @@ class SubagentRunner:
 
         llm = LLMClient(
             model=defn.model or self._parent.llm.model,
-            base_url=self._parent.llm._client.base_url,
+            base_url=getattr(self._parent.llm, "base_url", None),
         )
 
+        # Per-instance max_steps — no global monkey-patching
         subagent = Agent(
             llm_client=llm,
             registry=registry,
             workspace=self._parent.workspace,
             mode=self._parent.mode,
+            max_steps=defn.max_steps,
         )
-        import coder_agent.agent as agent_module
-        original_max = agent_module.MAX_STEPS
-        agent_module.MAX_STEPS = defn.max_steps
-        try:
-            result = subagent.run(request.prompt)
-            return SubagentResult(
-                subagent_type=request.subagent_type,
-                final_output=result,
-                steps_used=subagent.state.step,
-                metadata={"workspace": str(self._parent.workspace)},
-            )
-        finally:
-            agent_module.MAX_STEPS = original_max
+        result = subagent.run(request.prompt)
+        return SubagentResult(
+            subagent_type=request.subagent_type,
+            final_output=result,
+            steps_used=subagent.state.step,
+            metadata={"workspace": str(self._parent.workspace)},
+        )

@@ -100,6 +100,7 @@ class Agent:
         mode: AgentMode = AgentMode.GOAL,
         llm_verifier_mode: str = "off",
         llm_verifier_model: str = "gemini-2.5-flash",
+        max_steps: int = MAX_STEPS,
     ) -> None:
         self.llm = llm_client
         self.registry = registry
@@ -113,6 +114,7 @@ class Agent:
         self._verifier = verifier
         self.recovery = RecoveryStrategy()
         self.mode = mode
+        self._max_steps = max_steps
         self.inspector = ContextInspector()
         self.messages: list[dict] = []
         self._n_steps = 0
@@ -156,7 +158,7 @@ class Agent:
         if self._progress_tracker:
             self._progress_tracker.problem = task
 
-        while self._n_steps < MAX_STEPS:
+        while self._n_steps < self._max_steps:
             self._n_steps += 1
             logger.info("=== Step %d ===", self._n_steps)
 
