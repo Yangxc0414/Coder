@@ -141,3 +141,21 @@ class TestInstallHooks:
         install_logging_hooks(registry)
         registry.fire(POST_TOOL_USE.with_data(tool_name="write_file", success=True))
         assert "POST_TOOL_USE" in caplog.text
+
+    def test_trace_hooks_actually_record(self):
+        """Regression: trace hooks once passed wrong args to record() and the
+        error was silently swallowed — hooks appeared to work but recorded
+        nothing."""
+        from coder_agent.trace import TraceRecorder
+
+        trace = TraceRecorder()
+        registry = HookRegistry()
+        install_trace_hooks(registry, trace)
+
+        registry.fire(PRE_TOOL_USE.with_data(tool_name="read_file", args={"path": "x"}))
+        registry.fire(POST_TOOL_USE.with_data(tool_name="read_file", success=True))
+        registry.fire(TURN_STOPPED.with_data(step=3))  # 'step' in payload must not collide
+
+        events = [e["event"] for e in trace.get_entries()]
+        assert events.count("hook") == 3
+        assert trace.get_entries()[-1]["step"] == 3
