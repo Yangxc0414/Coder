@@ -8,6 +8,22 @@ from typing import Any
 
 from openai import OpenAI
 
+# Try to use legacy SSL context for older OpenSSL versions
+# (Agnes API may require TLS 1.3 which old OpenSSL doesn't support)
+try:
+    import ssl as _ssl
+    _ssl_ctx = _ssl._create_legacy_context()
+    _SSL_CONTEXT = _ssl_ctx
+except Exception:
+    try:
+        import ssl as _ssl
+        _ssl_ctx = _ssl.create_default_context()
+        _ssl_ctx.check_hostname = False
+        _ssl_ctx.verify_mode = _ssl.CERT_NONE
+        _SSL_CONTEXT = _ssl_ctx
+    except Exception:
+        _SSL_CONTEXT = None
+
 
 @dataclass
 class LLMResponse:
@@ -42,6 +58,16 @@ class LLMClient:
             client_kwargs["base_url"] = base_url
         elif env_url := os.getenv("OPENAI_BASE_URL"):
             client_kwargs["base_url"] = env_url
+
+        # Patch SSL if needed for older OpenSSL
+        if _SSL_CONTEXT is not None:
+            import httpx as _httpx
+            original_init = _httpx.Client.__init__
+            def patched_init(self, *args, **kwargs):
+                kwargs.setdefault("verify", _SSL_CONTEXT)
+                return original_init(self, *args, **kwargs)
+            _httpx.Client.__init__ = patched_init  # type: ignore
+
         self._client = OpenAI(**client_kwargs)
 
     def chat(

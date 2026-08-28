@@ -76,6 +76,8 @@ class RunCommandTool(Tool):
                 timeout=timeout,
                 cwd=str(cwd),
                 env=self._safe_env(),
+                encoding="utf-8",
+                errors="replace",
             )
             output = self._truncate(result.stdout)
             stderr = self._truncate(result.stderr) if result.returncode != 0 else ""
