@@ -144,12 +144,13 @@ class CoderRepl:
         help_text = """
 [bold yellow]Available Commands:[/bold yellow]
   [cyan]/run <task>[/cyan]     Run agent on a task
-  [cyan]/mode <name>[/cyan]     Switch mode: goal / plan / dry-run / full
+  [cyan]/mode <name>[/cyan]     Switch mode: goal / plan / dry-run / full (next /run)
   [cyan]/status[/cyan]          Show context status
+  [cyan]/tools[/cyan]           List tools available to the model
   [cyan]/compact[/cyan]         Force context compression
   [cyan]/history[/cyan]         Show recent memory
   [cyan]/trace[/cyan]           Show trace summary
-  [cyan]/clear[/cyan]           Clear conversation
+  [cyan]/clear[/cyan]           Clear conversation display state
   [cyan]/exit[/cyan]            Exit
 
 [bold yellow]Modes:[/bold yellow]
@@ -189,7 +190,7 @@ class CoderRepl:
         elif cmd == "/compact":
             n = len(self.state.messages)
             if n <= 2 * self.state.keep_rounds:
-                self._console.print("[dim]No compression needed ({n} messages, under threshold).[/dim]")
+                self._console.print(f"[dim]No compression needed ({n} messages, under threshold).[/dim]")
             else:
                 # Keep system + recent rounds, drop older tool results
                 # Preserve the first message (system context placeholder) and last 2*keep_rounds
@@ -211,6 +212,18 @@ class CoderRepl:
                 self._console.print(self.state.trace_recorder.summarize())
             else:
                 self._console.print("[dim]No trace data yet.[/dim]")
+        elif cmd == "/tools":
+            registry = create_default_registry(self.workspace, self.mode)
+            names = registry.list_names()
+            core = [n for n in names if not n.startswith(("mcp_", "skill_"))]
+            mcp = [n for n in names if n.startswith("mcp_")]
+            skills = [n for n in names if n.startswith("skill_")]
+            self._console.print("[bold]Core tools:[/bold]  " + ", ".join(core))
+            if mcp:
+                self._console.print("[bold]MCP tools:[/bold]   " + ", ".join(mcp))
+            if skills:
+                self._console.print("[bold]Skills:[/bold]      " + ", ".join(skills))
+            self._console.print(f"[dim]Total: {len(names)} tools available to the model.[/dim]")
         elif cmd == "/run":
             if not arg:
                 self._console.print("[red]Usage: /run <task description>[/red]")
@@ -226,6 +239,20 @@ class CoderRepl:
         self._console.print()
 
         agent = self._build_agent(task)
+
+        # Live progress feedback — without this the user stares at a
+        # silent screen for the whole run (logging hooks go to the
+        # logger, which is silent in the REPL).
+        def _on_post_tool(event) -> None:
+            tool = event.data.get("tool_name", "?")
+            mark = "[green]✓[/green]" if event.data.get("success") else "[red]✗[/red]"
+            self._console.print(f"  [dim]step {agent._n_steps}[/dim] {mark} {tool}")
+
+        def _on_turn(event) -> None:
+            self._console.print(f"[dim]── turn {event.data.get('step')} ──[/dim]")
+
+        agent.hooks.register("POST_TOOL_USE", _on_post_tool)
+        agent.hooks.register("TURN_STOPPED", _on_turn)
 
         try:
             answer = agent.run(task)
@@ -273,13 +300,16 @@ class CoderRepl:
             return 0
 
         # Interactive mode with prompt_toolkit
-        history_path = self.workspace / ".coder_history"
+        # History lives in the user's home dir — not the workspace,
+        # so running the agent never pollutes the user's project.
+        history_path = Path.home() / ".coder_history"
         session = PromptSession(
             history=FileHistory(str(history_path)),
             complete=False,
         )
 
-        prompt = "➜ [bold cyan]task[/bold cyan] "
+        # prompt_toolkit needs real ANSI escapes, not Rich markup
+        prompt = ANSI("\x1b[36m➜\x1b[0m \x1b[1;96mtask\x1b[0m ")
 
         while True:
             try:
@@ -304,6 +334,15 @@ class CoderRepl:
 def main() -> int:
     """CLI entrypoint for interactive mode."""
     import argparse
+
+    # Guard against UnicodeEncodeError on Windows GBK consoles
+    if sys.platform == "win32":
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, OSError):
+                pass
+
     parser = argparse.ArgumentParser(description="coder-agent: Interactive CLI")
     parser.add_argument("--workspace", default=".", help="Workspace directory")
     parser.add_argument("--model", default="agnes-2.5-flash", help="Model name")

@@ -64,4 +64,4 @@ class ContextInspector:
         for msg in messages:
             if msg.get("role") in ("user", "assistant"):
                 rounds += 1
-        return max(1, rounds // 2)
+        return rounds // 2

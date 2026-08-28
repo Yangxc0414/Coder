@@ -39,7 +39,22 @@ def setup_logging(verbose: bool = False) -> None:
     )
 
 
+def _force_utf8_console() -> None:
+    """Guard against UnicodeEncodeError on Windows GBK consoles (cmd.exe).
+
+    Emoji and box-drawing chars in our output would crash plain print()
+    under cp936; reconfigure streams to UTF-8 with replacement instead.
+    """
+    if sys.platform == "win32":
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, OSError):
+                pass
+
+
 def main() -> None:
+    _force_utf8_console()
     parser = argparse.ArgumentParser(
         description="coder-agent: A minimal coding agent with ReAct loop"
     )
