@@ -69,13 +69,19 @@ class WriteFileTool(Tool):
         "required": ["path", "content"],
     }
 
-    def __init__(self, workspace: Path) -> None:
+    def __init__(self, workspace: Path, dry_run: bool = False) -> None:
         self.workspace = Path(workspace).resolve()
+        self.dry_run = dry_run
 
     def execute(self, args: dict[str, str]) -> ToolResult:
         try:
             resolved = self._resolve_path(args["path"])
             resolved.parent.mkdir(parents=True, exist_ok=True)
+            if self.dry_run:
+                # In dry-run mode, don't actually write — just report what would happen
+                return ToolResult(
+                    output=f"[DRY RUN] Would write {len(args['content'])} chars to {resolved}"
+                )
             resolved.write_text(args["content"], encoding="utf-8")
             return ToolResult(
                 output=f"Written {len(args['content'])} characters to {resolved.name}"

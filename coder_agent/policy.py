@@ -10,6 +10,10 @@ Key principle: security is enforced at code level, NOT in the prompt.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .mode import AgentMode
 
 
 @dataclass
@@ -45,16 +49,49 @@ class PolicyGate:
         "> /",
     ])
 
-    def check(self, tool_name: str, args: dict) -> PolicyResult:
+    def check(
+        self,
+        tool_name: str,
+        args: dict,
+        mode: "AgentMode" = None,
+    ) -> PolicyResult:
         """Check if a tool call is approved.
 
         Args:
             tool_name: Name of the tool being called
             args: Arguments passed to the tool
-
-        Returns:
-            PolicyResult with approved=True/False and optional reason
+            mode: AgentMode affecting policy strictness
         """
+        # DRY_RUN mode: allow everything but don't execute writes
+        if mode and mode.value == "dry-run":
+            return PolicyResult(approved=True, needs_log=True)
+
+        # FULL mode: relax policy denials (path safety still enforced by tools)
+        if mode and mode.value == "full":
+            if tool_name in self.ALLOW_LIST or tool_name in self.LOG_LIST:
+                return PolicyResult(approved=True)
+            if tool_name == "run_command":
+                cmd = args.get("command", "")
+                for pattern in self.DANGEROUS_COMMAND_PATTERNS:
+                    if pattern.lower() in cmd.lower():
+                        return PolicyResult(
+                            approved=False,
+                            reason=f"Dangerous command blocked: contains '{pattern}'",
+                        )
+                return PolicyResult(approved=True, needs_log=True)
+            return PolicyResult(approved=True)  # Full mode: allow unknown tools too
+
+        # PLAN mode: read-only, block writes and commands
+        if mode and mode.value == "plan":
+            if tool_name in self.ALLOW_LIST:
+                return PolicyResult(approved=True)
+            # Block anything that modifies state
+            return PolicyResult(
+                approved=False,
+                reason=f"Plan mode is read-only: '{tool_name}' is not a read-only operation",
+            )
+
+        # GOAL mode (default): normal policy
         if tool_name in self.ALLOW_LIST:
             return PolicyResult(approved=True)
 

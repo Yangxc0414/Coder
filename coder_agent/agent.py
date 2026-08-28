@@ -17,6 +17,8 @@ from .tools.registry import ToolRegistry
 from .trace import TraceRecorder
 from .verifier import Verifier
 from .recovery import RecoveryStrategy
+from .mode import AgentMode
+from .inspector import ContextInspector
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +87,7 @@ class Agent:
         context_manager: ContextManager | None = None,
         trace_output: Path | None = None,
         verifier: Verifier | None = None,
+        mode: AgentMode = AgentMode.GOAL,
     ) -> None:
         self.llm = llm_client
         self.registry = registry
@@ -97,6 +100,8 @@ class Agent:
         self.trace = TraceRecorder(trace_output)
         self._verifier = verifier
         self.recovery = RecoveryStrategy()
+        self.mode = mode
+        self.inspector = ContextInspector()
         self.messages: list[dict] = []
         self._n_steps = 0
         self._n_format_errors = 0
@@ -249,7 +254,7 @@ class Agent:
 
         # Policy check
         policy_result: PolicyResult = self.policy.check(
-            parsed.tool_name, parsed.arguments
+            parsed.tool_name, parsed.arguments, mode=self.mode
         )
         if not policy_result.approved:
             result = ToolResult(error=f"Policy denied: {policy_result.reason}")
