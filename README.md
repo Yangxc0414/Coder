@@ -50,6 +50,8 @@ python -m coder_agent.main "task" \
     --mode full \                           # goal | plan | dry-run | full
     --max-tokens 8000 \                     # context compression budget
     --keep-rounds 6 \                       # recent rounds kept verbatim
+    --token-budget 100000 \                 # wrap up & stop when exhausted
+    --session-output session.jsonl \        # journal messages for later --resume
     --trace-output trace.jsonl              # JSONL execution trace
 ```
 
