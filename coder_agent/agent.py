@@ -19,6 +19,15 @@ from .verifier import Verifier
 from .recovery import RecoveryStrategy
 from .mode import AgentMode
 from .inspector import ContextInspector
+from .hooks import HookRegistry, install_logging_hooks, install_trace_hooks, PRE_TOOL_USE, POST_TOOL_USE, TURN_STOPPED, AGENT_STARTED, AGENT_ENDED
+
+try:
+    from .verifier_llm import ProgressTracker, select as llm_select
+    _LLM_VERIFIER_AVAILABLE = True
+except ImportError:
+    _LLM_VERIFIER_AVAILABLE = False
+    ProgressTracker = None  # type: ignore[assignment, misc]
+    llm_select = None  # type: ignore[assignment, misc]
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +97,8 @@ class Agent:
         trace_output: Path | None = None,
         verifier: Verifier | None = None,
         mode: AgentMode = AgentMode.GOAL,
+        llm_verifier_mode: str = "off",
+        llm_verifier_model: str = "gemini-2.5-flash",
     ) -> None:
         self.llm = llm_client
         self.registry = registry
@@ -106,8 +117,26 @@ class Agent:
         self._n_steps = 0
         self._n_format_errors = 0
 
+        # LLM verifier setup (optional, enabled via --llm-verifier-mode)
+        self._llm_verifier_mode = llm_verifier_mode if _LLM_VERIFIER_AVAILABLE else "off"
+        self._progress_tracker: ProgressTracker | None = None
+        self._candidate_answers: list[str] = []
+        self._llm_verifier_model = llm_verifier_model
+        self._llm_warned = False
+        if self._llm_verifier_mode != "off":
+            self._progress_tracker = ProgressTracker(
+                problem="",  # set at run() time
+                model=llm_verifier_model,
+            )
+
+        # Hook registry
+        self.hooks = HookRegistry()
+        install_logging_hooks(self.hooks)
+        install_trace_hooks(self.hooks, self.trace)
+
     def run(self, task: str) -> str:
         """Run the agent on a programming task. Returns the final answer."""
+        self.hooks.fire(AGENT_STARTED.with_data(task=task))
         self.messages = [
             {"role": "user", "content": task},
         ]
@@ -115,6 +144,10 @@ class Agent:
         self._n_format_errors = 0
         self.state.task_goal = task
         self.recovery.reset()
+        self._candidate_answers = []
+        self._llm_warned = False
+        if self._progress_tracker:
+            self._progress_tracker.problem = task
 
         while self._n_steps < MAX_STEPS:
             self._n_steps += 1
@@ -136,6 +169,10 @@ class Agent:
                     )
                     logger.info("Agent completed with answer (step %d)", self._n_steps)
 
+                    # Save candidate for LLM verifier selection (select/full modes)
+                    if self._llm_verifier_mode in ("select", "full"):
+                        self._candidate_answers.append(answer)
+
                     # Run verifier if configured
                     if self._verifier:
                         passed, summary = self._verifier.check()
@@ -151,6 +188,26 @@ class Agent:
                                 "content": f"Verification failed:\n{summary}\nPlease fix the issues and try again."
                             })
                             continue
+
+                    # LLM verifier: select best candidate (select/full modes)
+                    if self._llm_verifier_mode in ("select", "full") and len(self._candidate_answers) >= 2:
+                        sel_result = llm_select(
+                            problem=task,
+                            candidates=self._candidate_answers,
+                            model=self._llm_verifier_model,
+                        )
+                        self.trace.record(
+                            self._n_steps, "llm_verifier_select",
+                            best_index=sel_result.index,
+                            scores=sel_result.scores,
+                            ranking=sel_result.ranking,
+                            n_candidates=len(self._candidate_answers),
+                        )
+                        answer = self._candidate_answers[sel_result.index]
+                        logger.info(
+                            "LLMVerifier selected candidate %d/%d  scores=%s",
+                            sel_result.index + 1, len(self._candidate_answers), sel_result.scores,
+                        )
 
                     return answer
 
@@ -177,6 +234,9 @@ class Agent:
                     })
                     self._loop_warning_injected = True
 
+                # Fire TURN_STOPPED hook
+                self.hooks.fire(TURN_STOPPED.with_data(step=self._n_steps))
+
             except Exception as e:
                 logger.error("Unexpected agent error: %s", e, exc_info=True)
                 # Attempt recovery
@@ -200,6 +260,10 @@ class Agent:
                     )
                     return f"Agent terminated: {result.action}. {result.message or ''}"
 
+        self.hooks.fire(AGENT_ENDED.with_data(
+            steps=self._n_steps,
+            final_state=self.state.to_status_prompt(),
+        ))
         return "Agent reached maximum steps without completing the task."
 
     def _query_llm(self) -> LLMResponse:
@@ -241,6 +305,13 @@ class Agent:
 
     def _execute_tool_call(self, parsed: Any) -> None:
         tool = self.registry.get(parsed.tool_name)
+
+        # Fire PRE_TOOL_USE hook (can block by raising)
+        self.hooks.fire(PRE_TOOL_USE.with_data(
+            tool_name=parsed.tool_name,
+            args=parsed.arguments,
+            call_id=parsed.call_id,
+        ))
 
         # Update state
         self.state.step = self._n_steps
@@ -290,6 +361,35 @@ class Agent:
             output_len=len(result.output),
         )
         self._n_format_errors = 0  # successful step resets error counter
+
+        # Fire POST_TOOL_USE hook
+        self.hooks.fire(POST_TOOL_USE.with_data(
+            tool_name=parsed.tool_name,
+            success=result.success,
+            error=result.error,
+            output_len=len(result.output),
+        ))
+
+        # LLM progress tracking (progress/full modes)
+        if self._progress_tracker is not None:
+            step_desc = (
+                f"{parsed.tool_name}({parsed.arguments.get('path', parsed.arguments.get('command', '?')[:40])})"
+            )
+            score = self._progress_tracker.update(step_desc)
+            self.trace.record(
+                self._n_steps, "llm_progress",
+                score=score, step_desc=step_desc[:80],
+            )
+            if score < 0.15 and not self._llm_warned:
+                logger.warning("LLM progress score low (%.3f), injecting guidance", score)
+                self.messages.append({
+                    "role": "user",
+                    "content": (
+                        f"The progress verifier indicates your current approach may be off-track "
+                        f"(score: {score:.2f}). Re-evaluate your plan and consider a different strategy."
+                    ),
+                })
+                self._llm_warned = True
 
     def _handle_format_error(self, error: FormatError) -> None:
         self._n_format_errors += 1
