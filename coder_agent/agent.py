@@ -119,6 +119,10 @@ class Agent:
         self.messages: list[dict] = []
         self._n_steps = 0
         self._n_format_errors = 0
+        self._n_mutations = 0
+        # 0, not None: a failed check with zero mutations means the failure
+        # predates this task (pre-existing broken tests) — never retry it.
+        self._verify_snapshot: int = 0
 
         # LLM verifier setup (optional, enabled via --llm-verifier-mode)
         self._llm_verifier_mode = llm_verifier_mode if _LLM_VERIFIER_AVAILABLE else "off"
@@ -155,6 +159,10 @@ class Agent:
         self.recovery.reset()
         self._candidate_answers = []
         self._llm_warned = False
+        self._n_mutations = 0
+        # 0, not None: a failed check with zero mutations means the failure
+        # predates this task (pre-existing broken tests) — never retry it.
+        self._verify_snapshot: int = 0
         if self._progress_tracker:
             self._progress_tracker.problem = task
 
@@ -182,7 +190,14 @@ class Agent:
                     if self._llm_verifier_mode in ("select", "full"):
                         self._candidate_answers.append(answer)
 
-                    # Run verifier if configured
+                    # Run verifier if configured.
+                    # Gate rule: verification can only be retried when the
+                    # agent actually changed something since the last failed
+                    # check. Otherwise the failure predates or is unrelated to
+                    # this task (e.g. a pre-existing broken test in the
+                    # workspace) and retrying would just burn steps — the
+                    # real-API incident that turned a 2-step answer into a
+                    # 50-step flail.
                     if self._verifier:
                         passed, summary = self._verifier.check()
                         self.trace.record(
@@ -191,12 +206,24 @@ class Agent:
                             summary=summary[:200],
                         )
                         if not passed:
-                            logger.warning("Verification failed, injecting prompt")
-                            self.messages.append({
-                                "role": "user",
-                                "content": f"Verification failed:\n{summary}\nPlease fix the issues and try again."
-                            })
-                            continue
+                            snapshot = self._n_mutations
+                            if snapshot == self._verify_snapshot:
+                                logger.warning(
+                                    "Verification failed but nothing changed "
+                                    "since the last check — accepting answer"
+                                )
+                                self.trace.record(
+                                    self._n_steps, "verification_accept",
+                                    reason="no mutations since last failed check",
+                                )
+                            else:
+                                self._verify_snapshot = snapshot
+                                logger.warning("Verification failed, injecting prompt")
+                                self.messages.append({
+                                    "role": "user",
+                                    "content": f"Verification failed:\n{summary}\nPlease fix the issues and try again."
+                                })
+                                continue
 
                     # LLM verifier: select best candidate (select/full modes)
                     if self._llm_verifier_mode in ("select", "full") and len(self._candidate_answers) >= 2:
@@ -331,6 +358,10 @@ class Agent:
             self.state.mark_file_read(parsed.arguments.get("path", ""))
         elif parsed.tool_name == "write_file":
             self.state.mark_file_modified(parsed.arguments.get("path", ""))
+
+        # Track workspace mutations — verification retries are gated on this
+        if parsed.tool_name in ("write_file", "run_command"):
+            self._n_mutations += 1
 
         # Policy check
         policy_result: PolicyResult = self.policy.check(
