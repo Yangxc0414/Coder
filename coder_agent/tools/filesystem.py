@@ -11,7 +11,8 @@ class ReadFileTool(Tool):
     name = "read_file"
     description = (
         "Read the contents of a text file from the workspace. "
-        "Returns the full file content as a string."
+        "Returns the file content as a string (large files are truncated "
+        "with a marker — read again in slices via search_text if needed)."
     )
     parameters = {
         "type": "object",
@@ -24,6 +25,9 @@ class ReadFileTool(Tool):
         "required": ["path"],
     }
 
+    # ~40K chars ≈ 10K tokens — keeps one read from dominating the context
+    MAX_CHARS = 40_000
+
     def __init__(self, workspace: Path) -> None:
         self.workspace = Path(workspace).resolve()
 
@@ -33,6 +37,12 @@ class ReadFileTool(Tool):
             if not resolved.exists():
                 return ToolResult(error=f"File not found: {resolved}")
             content = resolved.read_text(encoding="utf-8")
+            if len(content) > self.MAX_CHARS:
+                content = (
+                    content[: self.MAX_CHARS]
+                    + f"\n\n[... truncated: showing {self.MAX_CHARS} of "
+                    f"{len(content)} chars — use search_text for targeted lookup]"
+                )
             return ToolResult(output=content)
         except Exception as e:
             return ToolResult(error=f"read_file failed: {e}")
@@ -102,8 +112,9 @@ class WriteFileTool(Tool):
 class ListFilesTool(Tool):
     name = "list_files"
     description = (
-        "List all files and directories in the workspace recursively. "
-        "Paths are relative to the workspace root."
+        "List files and directories under a path, recursively. "
+        "Paths are relative to the workspace root. "
+        "Output is capped — narrow the path if the listing is truncated."
     )
     parameters = {
         "type": "object",
@@ -117,6 +128,10 @@ class ListFilesTool(Tool):
         "required": [],
     }
 
+    # A workspace with vendored/3rd-party trees can hold tens of thousands
+    # of files; uncapped output once blew a 584K-token context in real use.
+    MAX_ENTRIES = 300
+
     def __init__(self, workspace: Path) -> None:
         self.workspace = Path(workspace).resolve()
 
@@ -127,8 +142,29 @@ class ListFilesTool(Tool):
                 str(p.relative_to(self.workspace))
                 for p in target.rglob("*")
             )
+            if not entries:
+                return ToolResult(output="(directory is empty)")
+            if len(entries) <= self.MAX_ENTRIES:
+                return ToolResult(output="\n".join(entries))
+            # Large tree: a recursive first-300 slice buries the directories
+            # the user actually wants (real incident: root listing showed 300
+            # .pytest_cache/OneCode files while the target dir never appeared).
+            # Give a shallow map with per-directory sizes instead.
+            lines = []
+            for p in sorted(target.iterdir()):
+                rel = p.relative_to(self.workspace).as_posix()
+                if p.is_dir():
+                    try:
+                        n = sum(1 for _ in p.rglob("*"))
+                    except OSError:
+                        n = "?"
+                    lines.append(f"{rel}/  ({n} entries)")
+                else:
+                    lines.append(rel)
             return ToolResult(
-                output="\n".join(entries) if entries else "(directory is empty)"
+                output="\n".join(lines)
+                + f"\n[... shallow overview ({len(entries)} files total) — "
+                "call list_files on a subdirectory to expand it]"
             )
         except Exception as e:
             return ToolResult(error=f"list_files failed: {e}")

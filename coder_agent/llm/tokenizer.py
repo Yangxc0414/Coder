@@ -2,6 +2,11 @@
 
 Provides token estimation for messages and individual texts,
 used by ContextManager to decide when to compress the conversation.
+
+Accuracy note: counts are ESTIMATES for budgeting, not billing. For very
+large texts we fall back to a chars/4 heuristic because tiktoken's Rust
+encoder degrades badly on this machine (measured: 20K chars ≈ 0.6s,
+200K chars ≈ 30s+); one oversized tool output must never stall the loop.
 """
 
 from __future__ import annotations
@@ -20,19 +25,34 @@ _MODEL_ENCODINGS: dict[str, str] = {
     "babbage": "r50k_base",
 }
 
+# Texts at or above this length use the fast heuristic instead of tiktoken.
+_LARGE_TEXT_CHARS = 20_000
+
+# Encoding cache — one lookup per model per process.
+_ENCODING_CACHE: dict[str, tiktoken.Encoding] = {}
+
 
 def _encoding_for_model(model: str) -> tiktoken.Encoding:
-    """Get the tiktoken encoding for a model name."""
+    """Get the tiktoken encoding for a model name (cached)."""
+    cached = _ENCODING_CACHE.get(model)
+    if cached is not None:
+        return cached
     model_lower = model.lower()
-    for pattern, enc_name in _MODEL_ENCODINGS.items():
+    enc_name = "cl100k_base"
+    for pattern, name in _MODEL_ENCODINGS.items():
         if pattern in model_lower:
-            return tiktoken.get_encoding(enc_name)
-    # Default to cl100k_base (GPT-4 / most OpenAI-compatible models)
-    return tiktoken.get_encoding("cl100k_base")
+            enc_name = name
+            break
+    enc = tiktoken.get_encoding(enc_name)
+    _ENCODING_CACHE[model] = enc
+    return enc
 
 
 def count_tokens(text: str, model: str = "gpt-4o") -> int:
     """Count tokens in a single text string."""
+    if len(text) >= _LARGE_TEXT_CHARS:
+        # ~4 chars per token is a safe over/under-estimate for budgeting
+        return len(text) // 4
     enc = _encoding_for_model(model)
     return len(enc.encode(text))
 
@@ -42,22 +62,26 @@ def count_message_tokens(message: dict, model: str = "gpt-4o") -> int:
 
     Accounts for role prefix and tool_call structure per OpenAI formatting.
     """
-    enc = _encoding_for_model(model)
     # Base tokens per message (role + content overhead)
     tokens = 4  # roughly ~4 tokens for message wrapper
-    tokens += len(enc.encode(message.get("role", "")))
     content = message.get("content") or ""
-    tokens += len(enc.encode(content))
+    # Fast path first — avoids calling the encoder on oversized content
+    tokens += count_tokens(content, model)
+    if len(content) >= _LARGE_TEXT_CHARS:
+        return tokens
+    tokens += count_tokens(message.get("role", ""), model)
     # tool_calls also consume tokens
     for tc in message.get("tool_calls") or []:
         fn = tc.get("function", {})
-        tokens += len(enc.encode(fn.get("name", "")))
-        tokens += len(enc.encode(fn.get("arguments", "")))
+        tokens += count_tokens(fn.get("name", ""), model)
+        tokens += count_tokens(fn.get("arguments", ""), model)
     return tokens
 
 
 def count_messages_tokens(messages: list[dict], model: str = "gpt-4o") -> int:
     """Estimate total token count for a list of messages."""
+    if not messages:
+        return 0
     total = 0
     for msg in messages:
         total += count_message_tokens(msg, model)

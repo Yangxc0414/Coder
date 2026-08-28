@@ -91,10 +91,10 @@ class SearchTextTool(Tool):
             for line_no, line in enumerate(content.splitlines(), 1):
                 if use_regex:
                     if regex.search(line):
-                        matches.append(f"{rel_path}:{line_no}:{line.rstrip()}")
+                        matches.append(f"{rel_path}:{line_no}:{line.rstrip()[:500]}")
                 else:
                     if pattern in line:
-                        matches.append(f"{rel_path}:{line_no}:{line.rstrip()}")
+                        matches.append(f"{rel_path}:{line_no}:{line.rstrip()[:500]}")
 
                 if len(matches) >= max_results:
                     break

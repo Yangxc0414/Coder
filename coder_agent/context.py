@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .llm.tokenizer import count_messages_tokens
+from .llm.tokenizer import count_message_tokens, count_messages_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,10 @@ class ContextManager:
 
         # Separate system from conversation
         conv_messages = [m for m in all_messages if m.get("role") != "system"]
+        # Cap oversized messages on ALL paths — including the no-compression
+        # early return, where a single huge tool output would otherwise pass
+        # through uncapped (584K-token incident).
+        conv_messages = self._cap_oversized_messages(conv_messages, budget)
         # System is always kept
         result = [{"role": "system", "content": system}]
 
@@ -166,6 +170,39 @@ class ContextManager:
                 parts.append(f"Tool({tool_id}): {output}{'...' if len(content) > self.summary_max_chars else ''}")
 
         return "\n".join(parts)
+
+    def _cap_oversized_messages(
+        self, messages: list[dict], budget: int
+    ) -> list[dict]:
+        """Cap any single message that would dominate the token budget.
+
+        Even inside the "recent rounds kept full" window, one oversized tool
+        output (e.g. a huge file read) must not exceed the budget — otherwise
+        _truncate_to_budget's fallback would discard the entire history.
+        Returns copies; the caller's message list is not mutated.
+        """
+        per_msg_cap = int(budget * 0.6)  # tokens a single message may occupy
+        capped = []
+        for msg in messages:
+            if count_message_tokens(msg, self.model) <= per_msg_cap:
+                capped.append(msg)
+                continue
+            content = msg.get("content") or ""
+            if not content:
+                # e.g. assistant tool_calls-only message — keep structure intact
+                capped.append(msg)
+                continue
+            # ~3 chars/token is conservative for code-heavy content
+            keep_chars = per_msg_cap * 3
+            new_msg = dict(msg)
+            new_msg["content"] = (
+                content[:keep_chars]
+                + f"\n[... truncated by ContextManager: {len(content)} -> "
+                f"{keep_chars} chars to fit the context budget; "
+                "use search_text for targeted lookup]"
+            )
+            capped.append(new_msg)
+        return capped
 
     def _estimate_tool_schema_tokens(self, messages: list[dict]) -> int:
         """Estimate tokens consumed by tool schemas sent with each API call.
