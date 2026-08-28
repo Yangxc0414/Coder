@@ -14,6 +14,8 @@ from .policy import PolicyGate, PolicyResult
 from .state import AgentState
 from .tools.base import ToolResult
 from .tools.registry import ToolRegistry
+from .trace import TraceRecorder
+from .verifier import Verifier
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +82,8 @@ class Agent:
         workspace: Path,
         policy_gate: PolicyGate | None = None,
         context_manager: ContextManager | None = None,
+        trace_output: Path | None = None,
+        verifier: Verifier | None = None,
     ) -> None:
         self.llm = llm_client
         self.registry = registry
@@ -89,10 +93,11 @@ class Agent:
         self.state = AgentState()
         self.memory = Memory()
         self._loop_warning_injected = False
+        self.trace = TraceRecorder(trace_output)
+        self._verifier = verifier
         self.messages: list[dict] = []
         self._n_steps = 0
         self._n_format_errors = 0
-        self._trace: list[dict] = []
 
     def run(self, task: str) -> str:
         """Run the agent on a programming task. Returns the final answer."""
@@ -101,7 +106,6 @@ class Agent:
         ]
         self._n_steps = 0
         self._n_format_errors = 0
-        self._trace = []
         self.state.task_goal = task
 
         while self._n_steps < MAX_STEPS:
@@ -110,21 +114,36 @@ class Agent:
 
             try:
                 response = self._query_llm()
-                self._trace.append({
-                    "step": self._n_steps,
-                    "type": "llm_response",
-                    "has_tool_calls": response.tool_calls is not None,
-                    "finish_reason": response.finish_reason,
-                })
+                self.trace.record(
+                    self._n_steps, "llm_response",
+                    has_tool_calls=response.tool_calls is not None,
+                    finish_reason=response.finish_reason,
+                )
 
                 if not response.tool_calls:
                     answer = response.content or "(no content)"
-                    self._trace.append({
-                        "step": self._n_steps,
-                        "type": "final_answer",
-                        "answer_preview": answer[:300],
-                    })
+                    self.trace.record(
+                        self._n_steps, "final_answer",
+                        answer_preview=answer[:300],
+                    )
                     logger.info("Agent completed with answer (step %d)", self._n_steps)
+
+                    # Run verifier if configured
+                    if self._verifier:
+                        passed, summary = self._verifier.check()
+                        self.trace.record(
+                            self._n_steps, "verification",
+                            passed=passed,
+                            summary=summary[:200],
+                        )
+                        if not passed:
+                            logger.warning("Verification failed, injecting prompt")
+                            self.messages.append({
+                                "role": "user",
+                                "content": f"Verification failed:\n{summary}\nPlease fix the issues and try again."
+                            })
+                            continue
+
                     return answer
 
                 try:
@@ -237,13 +256,12 @@ class Agent:
             "content": result.to_message_content(),
         }
         self.messages.append(tool_msg)
-        self._trace.append({
-            "step": self._n_steps,
-            "type": "tool_execution",
-            "tool": parsed.tool_name,
-            "success": result.success,
-            "output_len": len(result.output),
-        })
+        self.trace.record(
+            self._n_steps, "tool_execution",
+            tool=parsed.tool_name,
+            success=result.success,
+            output_len=len(result.output),
+        )
         self._n_format_errors = 0  # successful step resets error counter
 
     def _handle_format_error(self, error: FormatError) -> None:

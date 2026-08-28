@@ -64,7 +64,7 @@ def test_read_file_task(tmp_path: Path) -> bool:
     # 验证：answer 中应包含 "Hello"
     ok = "Hello" in answer or "hello" in answer.lower()
     print(f"  answer: {answer[:200]}...")
-    print(f"  trace steps: {len(agent._trace)}")
+    print(f"  trace steps: {len(agent.trace.get_entries())}")
     return ok
 
 
@@ -88,7 +88,7 @@ def test_write_file_task(tmp_path: Path) -> bool:
 
     print(f"  file created: {created}, has greet: {has_greet}")
     print(f"  answer: {answer[:200]}...")
-    print(f"  trace steps: {len(agent._trace)}")
+    print(f"  trace steps: {len(agent.trace.get_entries())}")
     return created and has_greet
 
 
@@ -155,7 +155,7 @@ def test_divide_by_zero():
     print(f"  bug fixed: {has_fix if 'has_fix' in dir() else False}")
     print(f"  tests passed: {test_passed}")
     print(f"  answer: {answer[:300]}...")
-    print(f"  trace steps: {len(agent._trace)}")
+    print(f"  trace steps: {len(agent.trace.get_entries())}")
     return test_passed
 
 
