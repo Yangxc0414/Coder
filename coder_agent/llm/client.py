@@ -62,13 +62,11 @@ class LLMClient:
         # Patch SSL if needed for older OpenSSL
         if _SSL_CONTEXT is not None:
             import httpx as _httpx
-            original_init = _httpx.Client.__init__
-            def patched_init(self, *args, **kwargs):
-                kwargs.setdefault("verify", _SSL_CONTEXT)
-                return original_init(self, *args, **kwargs)
-            _httpx.Client.__init__ = patched_init  # type: ignore
-
-        self._client = OpenAI(**client_kwargs)
+            _ssl_transport = _httpx.HTTPTransport(verify=_SSL_CONTEXT)
+            _ssl_hx_client = _httpx.Client(transport=_ssl_transport, timeout=60.0)
+            self._client = OpenAI(**client_kwargs, http_client=_ssl_hx_client)
+        else:
+            self._client = OpenAI(**client_kwargs)
 
     def chat(
         self,
