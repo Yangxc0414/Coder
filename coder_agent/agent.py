@@ -21,6 +21,7 @@ from .mode import AgentMode
 from .inspector import ContextInspector
 from .hooks import HookRegistry, install_logging_hooks, install_trace_hooks, PRE_TOOL_USE, POST_TOOL_USE, TURN_STOPPED, AGENT_STARTED, AGENT_ENDED
 from .extensions.base import SubagentRunner
+from .journal import SessionJournal
 
 try:
     from .verifier_llm import ProgressTracker, select as llm_select
@@ -101,6 +102,7 @@ class Agent:
         llm_verifier_mode: str = "off",
         llm_verifier_model: str = "gemini-2.5-flash",
         max_steps: int = MAX_STEPS,
+        journal: "SessionJournal | None" = None,
     ) -> None:
         self.llm = llm_client
         self.registry = registry
@@ -115,6 +117,7 @@ class Agent:
         self.recovery = RecoveryStrategy()
         self.mode = mode
         self._max_steps = max_steps
+        self.journal = journal
         self.inspector = ContextInspector()
         self.messages: list[dict] = []
         self._n_steps = 0
@@ -147,15 +150,31 @@ class Agent:
         for defn in get_builtin_subagents():
             self.subagent_runner.register(defn)
 
-    def run(self, task: str) -> str:
-        """Run the agent on a programming task. Returns the final answer."""
+    def _append_message(self, message: dict[str, Any]) -> None:
+        """Single funnel for conversation mutation — keeps the session
+        journal complete without instrumenting every call site."""
+        self.messages.append(message)
+        if self.journal is not None:
+            self.journal.log_message(message)
+
+    def run(self, task: str, resume: bool = False) -> str:
+        """Run the agent on a programming task. Returns the final answer.
+
+        Args:
+            task: Task description, or the continuation instruction when
+                ``resume=True``.
+            resume: When True, keep existing ``self.messages`` (pre-loaded
+                from a journal by the caller) and append ``task`` as the
+                continuation instruction instead of resetting the session.
+        """
         self.hooks.fire(AGENT_STARTED.with_data(task=task))
-        self.messages = [
-            {"role": "user", "content": task},
-        ]
+        if resume:
+            self._append_message({"role": "user", "content": task})
+        else:
+            self._append_message({"role": "user", "content": task})
+            self.state.task_goal = task
         self._n_steps = 0
         self._n_format_errors = 0
-        self.state.task_goal = task
         self.recovery.reset()
         self._candidate_answers = []
         self._llm_warned = False
@@ -219,7 +238,7 @@ class Agent:
                             else:
                                 self._verify_snapshot = snapshot
                                 logger.warning("Verification failed, injecting prompt")
-                                self.messages.append({
+                                self._append_message({
                                     "role": "user",
                                     "content": f"Verification failed:\n{summary}\nPlease fix the issues and try again."
                                 })
@@ -261,7 +280,7 @@ class Agent:
                 # Loop detection
                 if self.state.get_loop_risk() and not self._loop_warning_injected:
                     logger.warning("Loop detected, injecting guidance")
-                    self.messages.append({
+                    self._append_message({
                         "role": "user",
                         "content": (
                             "You seem to be repeatedly operating on the same file(s). "
@@ -279,7 +298,7 @@ class Agent:
                 result = self.recovery.handle(e, self)
                 if result.recovered:
                     if result.message:
-                        self.messages.append({
+                        self._append_message({
                             "role": "user",
                             "content": result.message,
                         })
@@ -336,7 +355,7 @@ class Agent:
                 }
                 for i, tc in enumerate(response.tool_calls)
             ]
-        self.messages.append(msg)
+        self._append_message(msg)
         return response
 
     def _execute_tool_call(self, parsed: Any) -> None:
@@ -393,7 +412,7 @@ class Agent:
             "tool_call_id": parsed.call_id,
             "content": result.to_message_content(),
         }
-        self.messages.append(tool_msg)
+        self._append_message(tool_msg)
         self.trace.record(
             self._n_steps, "tool_execution",
             tool=parsed.tool_name,
@@ -422,7 +441,7 @@ class Agent:
             )
             if score < 0.15 and not self._llm_warned:
                 logger.warning("LLM progress score low (%.3f), injecting guidance", score)
-                self.messages.append({
+                self._append_message({
                     "role": "user",
                     "content": (
                         f"The progress verifier indicates your current approach may be off-track "
@@ -443,11 +462,11 @@ class Agent:
             f"Your previous response had a format error: {error}. "
             "Please fix it and call the tools again."
         )
-        self.messages.append({"role": "user", "content": correction})
+        self._append_message({"role": "user", "content": correction})
 
         if self._n_format_errors >= MAX_CONSECUTIVE_FORMAT_ERRORS:
             logger.error("Max format errors reached, requesting final answer.")
-            self.messages.append({
+            self._append_message({
                 "role": "user",
                 "content": (
                     "You have made too many format errors. "
