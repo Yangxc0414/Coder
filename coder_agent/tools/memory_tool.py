@@ -61,6 +61,10 @@ class MemoryTool(Tool):
             content = (args.get("content") or "").strip()
             if not key or not content:
                 return ToolResult(error="remember 需要 key 和 content 两个参数")
+            # 单行化：换行会让记忆条目在 system prompt 中伪装成独立指令行
+            # （持久化注入通道——条目会进入之后每次会话的系统提示）
+            key = " ".join(key.split())
+            content = " ".join(content.split())
             if len(content) > self.MAX_CONTENT_CHARS:
                 content = content[: self.MAX_CONTENT_CHARS] + "...[内容过长已截断，记住要点即可]"
             self._memory.remember(key, content)
