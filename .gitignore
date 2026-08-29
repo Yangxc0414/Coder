@@ -21,3 +21,5 @@ env/
 .coder_sessions/
 .coder_history
 .coder_bg/
+.coder_memory.md
+trace_*.jsonl

@@ -427,3 +427,15 @@ class TestReportCap:
         r = tool.execute({"prompt": "x"})
         assert len(r.output) < TaskTool.MAX_REPORT_CHARS + 400
         assert "报告截断" in r.output
+
+
+class TestMemoryContentCap:
+    def test_long_content_truncated_on_write(self, tmp_path: Path):
+        from coder_agent.memory import Memory
+
+        tool = MemoryTool(Memory(), tmp_path)
+        r = tool.execute({"action": "remember", "key": "k", "content": "c" * 5000})
+        assert r.success
+        saved = (tmp_path / ".coder_memory.md").read_text(encoding="utf-8")
+        assert len(saved) < 2200  # key + 截断后的 content
+        assert "内容过长已截断" in saved

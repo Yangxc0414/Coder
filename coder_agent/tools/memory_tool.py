@@ -45,6 +45,9 @@ class MemoryTool(Tool):
     }
 
     MAX_ENTRIES = 30
+    # 单条内容上限：summary 注入截断 100 字符，但存储若不设限，
+    # 模型可写入超大条目让 .coder_memory.md 无界膨胀
+    MAX_CONTENT_CHARS = 2_000
 
     def __init__(self, memory, workspace: Path) -> None:
         # memory: coder_agent.memory.Memory 实例（鸭子类型，避免循环导入）
@@ -54,10 +57,12 @@ class MemoryTool(Tool):
     def execute(self, args: dict[str, Any]) -> ToolResult:
         action = args.get("action", "list")
         if action == "remember":
-            key = (args.get("key") or "").strip()
+            key = (args.get("key") or "").strip()[:100]
             content = (args.get("content") or "").strip()
             if not key or not content:
                 return ToolResult(error="remember 需要 key 和 content 两个参数")
+            if len(content) > self.MAX_CONTENT_CHARS:
+                content = content[: self.MAX_CONTENT_CHARS] + "...[内容过长已截断，记住要点即可]"
             self._memory.remember(key, content)
             self._persist()
             n = len(self._memory.long_term)
