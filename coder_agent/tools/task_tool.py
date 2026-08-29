@@ -55,7 +55,11 @@ class TaskTool(Tool):
             return ToolResult(error="prompt 不能为空——子代理看不到主对话，请给出自包含的任务描述")
         subagent_type = args.get("subagent_type", "researcher")
 
-        result = self._runner.run(SubagentRequest(prompt=prompt, subagent_type=subagent_type))
+        try:
+            result = self._runner.run(SubagentRequest(prompt=prompt, subagent_type=subagent_type))
+        except Exception as e:
+            # 工具契约：不向主循环抛异常（子代理构造/连接失败归为观察）
+            return ToolResult(error=f"task delegation failed: {e}")
         if result.is_error:
             return ToolResult(error=result.final_output)
         output = (

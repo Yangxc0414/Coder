@@ -334,3 +334,46 @@ class TestPolicyIntegration:
                    workspace=tmp_path, mode=AgentMode.GOAL)
         assert "task" in shared and "memory" in shared
         assert a1.registry is a2.registry
+
+
+class TestSelfArtifactPollution:
+    """审计发现：list_files/search_text 会扫描自己的运行产物
+    （.coder_truncs/.coder_bg/.coder_memory.md），可能把 agent 引向
+    探索自身垃圾而非用户代码。"""
+
+    def test_list_files_hides_runtime_artifacts(self, tmp_path: Path):
+        from coder_agent.tools.filesystem import ListFilesTool
+
+        (tmp_path / "real.py").write_text("print(1)")
+        (tmp_path / ".coder_truncs").mkdir()
+        (tmp_path / ".coder_truncs" / "x.txt").write_text("x")
+        (tmp_path / ".coder_memory.md").write_text("k: v")
+        tool = ListFilesTool(tmp_path)
+        out = tool.execute({"path": "."}).output
+        assert "real.py" in out
+        assert ".coder_" not in out
+
+    def test_search_skips_runtime_artifacts(self, tmp_path: Path):
+        from coder_agent.tools.search import SearchTextTool
+
+        (tmp_path / "real.py").write_text("needle here")
+        (tmp_path / ".coder_truncs").mkdir()
+        (tmp_path / ".coder_truncs" / "x.txt").write_text("needle in artifacts")
+        tool = SearchTextTool(tmp_path)
+        r = tool.execute({"pattern": "needle"})
+        assert "real.py" in r.output
+        assert ".coder_truncs" not in r.output
+
+    def test_task_tool_never_raises(self, tmp_path: Path):
+        """工具契约：执行失败归为 ToolResult error，不向主循环抛异常。"""
+        class ExplodingRunner:
+            def run(self, request):
+                raise RuntimeError("child construction blew up")
+
+        agent = Agent(llm_client=LLMClient(model="mock"), registry=ToolRegistry(),
+                      workspace=tmp_path, mode=AgentMode.GOAL)
+        # 直接构造 TaskTool 挂爆炸 runner（绕过正常注册路径）
+        tool = TaskTool(ExplodingRunner())
+        r = tool.execute({"prompt": "x"})
+        assert not r.success
+        assert "task delegation failed" in r.error

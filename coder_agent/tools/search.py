@@ -78,6 +78,8 @@ class SearchTextTool(Tool):
         for filepath in search_root.rglob(file_pattern):
             if not filepath.is_file():
                 continue
+            if any(part.startswith(".coder_") for part in filepath.parts):
+                continue  # 跳过自身运行产物（转存/日志/记忆文件）
             files_scanned += 1
             if files_scanned > 500:  # safety limit
                 break

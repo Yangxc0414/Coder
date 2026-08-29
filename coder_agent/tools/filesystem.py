@@ -177,6 +177,8 @@ class ListFilesTool(Tool):
             entries = sorted(
                 str(p.relative_to(self.workspace))
                 for p in target.rglob("*")
+                # 不把自己的运行产物当工作区内容展示
+                if ".coder_" not in p.parts
             )
             if not entries:
                 return ToolResult(output="(directory is empty)")
@@ -188,6 +190,8 @@ class ListFilesTool(Tool):
             # Give a shallow map with per-directory sizes instead.
             lines = []
             for p in sorted(target.iterdir()):
+                if p.name.startswith(".coder_"):
+                    continue
                 rel = p.relative_to(self.workspace).as_posix()
                 if p.is_dir():
                     try:
