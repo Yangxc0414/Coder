@@ -109,7 +109,15 @@ class SearchTextTool(Tool):
 
         output = "\n".join(matches)
         if len(output) > self.MAX_OUTPUT_CHARS:
-            output = output[:self.MAX_OUTPUT_CHARS] + "\n... [truncated]"
+            # Keep all matches retrievable — full list goes to an offload file
+            from .overflow import offload_overflow
+
+            full = f"Found {len(matches)} matches in {files_scanned} files:\n{output}"
+            output = offload_overflow(
+                self.workspace, full,
+                source="search_text", preview_chars=self.MAX_OUTPUT_CHARS,
+            )
+            return ToolResult(output=output)
 
         return ToolResult(
             output=f"Found {len(matches)} matches in {files_scanned} files:\n{output}"

@@ -15,3 +15,8 @@ env/
 
 # 环境变量
 .env
+
+# Agent 运行时产物（溢出转存/会话日志/输入历史）
+.coder_truncs/
+.coder_sessions/
+.coder_history

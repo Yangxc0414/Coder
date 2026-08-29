@@ -38,11 +38,15 @@ class ReadFileTool(Tool):
                 return ToolResult(error=f"File not found: {resolved}")
             content = resolved.read_text(encoding="utf-8")
             if len(content) > self.MAX_CHARS:
-                content = (
-                    content[: self.MAX_CHARS]
-                    + f"\n\n[... truncated: showing {self.MAX_CHARS} of "
-                    f"{len(content)} chars — use search_text for targeted lookup]"
+                # Cap context usage but keep the data retrievable:
+                # full content goes to an offload file the agent can read.
+                from .overflow import offload_overflow
+
+                output = offload_overflow(
+                    self.workspace, content,
+                    source="read_file", preview_chars=self.MAX_CHARS,
                 )
+                return ToolResult(output=output)
             return ToolResult(output=content)
         except Exception as e:
             return ToolResult(error=f"read_file failed: {e}")
