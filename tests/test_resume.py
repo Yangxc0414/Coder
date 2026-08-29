@@ -80,7 +80,9 @@ class TestResumeE2E:
 
         # --- Agent B: fresh, resumes the journal ---
         restored = load_journal(journal_path)
-        assert len(restored["messages"]) == 3  # user + assistant(tool_call) + tool result
+        # user + assistant(tool_call) + tool result + step-limit notice +
+        # the model's unanswered wrap-up attempt (improvement D journaled it)
+        assert len(restored["messages"]) == 5
 
         llm_b = RecordingLLM([_final("resumed and finished")])
         journal_b = SessionJournal(journal_path, append=True)
