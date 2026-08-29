@@ -12,7 +12,9 @@ class ReadFileTool(Tool):
     description = (
         "Read the contents of a text file from the workspace. "
         "Returns the file content as a string (large files are truncated "
-        "with a marker — read again in slices via search_text if needed)."
+        "with an offload pointer — use search_text for targeted lookup). "
+        "Re-reading an UNCHANGED file returns a short summary instead of "
+        "the full content — do not re-read files you have not modified."
     )
     parameters = {
         "type": "object",
@@ -27,16 +29,46 @@ class ReadFileTool(Tool):
 
     # ~40K chars ≈ 10K tokens — keeps one read from dominating the context
     MAX_CHARS = 40_000
+    # Real-run finding: the model re-read unchanged files 17-22 times each
+    # (57 reads where ~6 sufficed, burning ~40% of all steps). The cache
+    # short-circuits that: same path + same (mtime_ns, size) → summary.
+    CACHE_LIMIT = 64
+    UNCHANGED_PREVIEW = 200
 
     def __init__(self, workspace: Path) -> None:
         self.workspace = Path(workspace).resolve()
+        # path -> (mtime_ns, size, preview_of_last_content)
+        self._cache: dict[str, tuple[int, int, str]] = {}
 
     def execute(self, args: dict[str, str]) -> ToolResult:
         try:
             resolved = self._resolve_path(args["path"])
             if not resolved.exists():
+                self._cache.pop(str(resolved), None)
                 return ToolResult(error=f"File not found: {resolved}")
+
+            stat = resolved.stat()
+            signature = (stat.st_mtime_ns, stat.st_size)
+            key = str(resolved)
+
+            cached = self._cache.get(key)
+            if cached and (cached[0], cached[1]) == signature:
+                return ToolResult(
+                    output=(
+                        f"[unchanged] 文件内容与上次读取时完全相同（期间没有任何修改），"
+                        f"不再重复发送全文。前 {self.UNCHANGED_PREVIEW} 字符预览:\n"
+                        f"{cached[2]}\n"
+                        f"[如需定位特定片段，请用 search_text 在该文件内查找]"
+                    )
+                )
+
             content = resolved.read_text(encoding="utf-8")
+            self._cache[key] = (stat.st_mtime_ns, stat.st_size, content[: self.UNCHANGED_PREVIEW])
+            if len(self._cache) > self.CACHE_LIMIT:
+                # 简单淘汰：丢掉最早的一半，避免长会话无界增长
+                for k in list(self._cache)[: self.CACHE_LIMIT // 2]:
+                    self._cache.pop(k, None)
+
             if len(content) > self.MAX_CHARS:
                 # Cap context usage but keep the data retrievable:
                 # full content goes to an offload file the agent can read.
