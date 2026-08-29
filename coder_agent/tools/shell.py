@@ -14,6 +14,9 @@ class RunCommandTool(Tool):
     description = (
         "Execute a shell command in the workspace and return stdout/stderr. "
         "Use for running tests, building code, installing dependencies, etc. "
+        "For BLOCKING services (dev servers like http.server) set background=true "
+        "— the command returns immediately with a PID and log path; read the log "
+        "file later to check output. Note: on Windows use 'python', not 'python3'. "
         "Commands run in a sandboxed environment (no API keys exposed)."
     )
     parameters = {
@@ -32,6 +35,14 @@ class RunCommandTool(Tool):
                 "type": "string",
                 "description": "Working directory relative to workspace (default: root)",
                 "default": ".",
+            },
+            "background": {
+                "type": "boolean",
+                "description": (
+                    "Run without blocking (for dev servers / watchers). "
+                    "Returns PID + log file path immediately (default: false)"
+                ),
+                "default": False,
             },
         },
         "required": ["command"],
@@ -59,6 +70,7 @@ class RunCommandTool(Tool):
         command = args["command"]
         timeout = int(args.get("timeout", 60))
         cwd_str = args.get("cwd", ".")
+        background = bool(args.get("background", False))
 
         # Safety check: dangerous command patterns
         if self._is_dangerous(command):
@@ -68,6 +80,10 @@ class RunCommandTool(Tool):
 
         try:
             cwd = (self.workspace / cwd_str).resolve()
+
+            if background:
+                return self._run_background(command, cwd)
+
             result = subprocess.run(
                 command,
                 shell=True,
@@ -88,10 +104,52 @@ class RunCommandTool(Tool):
             )
         except subprocess.TimeoutExpired:
             return ToolResult(
-                error=f"Command timed out after {timeout}s: {command[:200]}"
+                error=(
+                    f"Command timed out after {timeout}s: {command[:200]}. "
+                    "If this is a long-running service (server/watcher), "
+                    "re-run it with background=true instead."
+                )
             )
         except Exception as e:
             return ToolResult(error=f"Command execution failed: {e}")
+
+    BG_LOG_DIR = ".coder_bg"
+
+    def _run_background(self, command: str, cwd: Path) -> ToolResult:
+        """Launch a long-running command without blocking.
+
+        Real-run finding: the agent needed a live dev server for page
+        verification, but blocking `http.server` only ever died at the
+        tool timeout. Background mode returns immediately; output goes to
+        a log file the agent can inspect with read_file.
+        """
+        import time
+
+        log_dir = self.workspace / self.BG_LOG_DIR
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / f"bg_{time.strftime('%H%M%S')}_{os.getpid()}.log"
+
+        try:
+            with open(log_path, "w", encoding="utf-8") as log_fh:
+                proc = subprocess.Popen(
+                    command,
+                    shell=True,
+                    stdout=log_fh,
+                    stderr=subprocess.STDOUT,
+                    cwd=str(cwd),
+                    env=self._safe_env(),
+                )
+            return ToolResult(
+                output=(
+                    f"已在后台启动 (PID {proc.pid}): {command[:100]}\n"
+                    f"日志文件: {self.BG_LOG_DIR}/{log_path.name}\n"
+                    f"稍后用 read_file 查看该日志确认服务状态；"
+                    f"停止服务请用系统命令结束该 PID。"
+                ),
+                returncode=0,
+            )
+        except Exception as e:
+            return ToolResult(error=f"Background launch failed: {e}")
 
     def _is_dangerous(self, command: str) -> bool:
         cmd_lower = command.lower()
@@ -105,6 +163,16 @@ class RunCommandTool(Tool):
 
     @staticmethod
     def _safe_env() -> dict[str, str]:
-        """Return a sanitized environment — no API keys or secrets."""
-        safe_keys = {"PATH", "HOME", "USER", "LANG", "TERM", "PYTHONPATH"}
-        return {k: v for k, v in os.environ.items() if k in safe_keys}
+        """Block secrets from leaking into subprocesses, keep OS essentials.
+
+        Design note: a strict whitelist (PATH/HOME/...) breaks Python on
+        Windows — without SYSTEMROOT the interpreter dies at startup with
+        "_Py_HashRandomization_Init: failed to get random numbers", which
+        silently killed every python command in a real agent run (13
+        consecutive failures). Invert the strategy: pass everything EXCEPT
+        variables whose name looks like a credential.
+        """
+        import re
+
+        secret_pattern = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL", re.IGNORECASE)
+        return {k: v for k, v in os.environ.items() if not secret_pattern.search(k)}
