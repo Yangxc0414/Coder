@@ -341,7 +341,9 @@ class Agent:
 
                 try:
                     parsed = parse_tool_calls(
-                        response.tool_calls, self.registry.list_names()
+                        response.tool_calls,
+                        self.registry.list_names(),
+                        schemas=self.registry.get_parameter_schemas(),
                     )
                 except FormatError as e:
                     self._handle_format_error(e)

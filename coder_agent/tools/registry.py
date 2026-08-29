@@ -47,6 +47,13 @@ class ToolRegistry:
         """Return all registered tool names."""
         return list(self._tools.keys())
 
+    def get_parameter_schemas(self) -> dict[str, dict[str, Any]]:
+        """Return tool name → parameter JSON schema, for parser validation."""
+        return {
+            name: tool.parameters or {}
+            for name, tool in self._tools.items()
+        }
+
     def __len__(self) -> int:
         return len(self._tools)
 
