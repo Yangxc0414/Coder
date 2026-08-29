@@ -160,6 +160,21 @@ class Agent:
         for defn in get_builtin_subagents():
             self.subagent_runner.register(defn)
 
+        # task tool — expose delegation to the model (my-pi-agent pattern:
+        # subagents hidden in Python plumbing are unreachable to the model).
+        # Anti-recursion: SubagentRunner.run strips "task"/"memory" from the
+        # child registry, so children can never re-delegate.
+        from coder_agent.tools.task_tool import TaskTool
+        self.registry.register(TaskTool(self.subagent_runner))
+
+        # memory tool — model-writable long-term facts, persisted to
+        # .coder_memory.md and injected into the system prompt (my-pi-agent
+        # memory-as-tool pattern, simplified for our sync design).
+        from coder_agent.tools.memory_tool import MemoryTool
+        memory_tool = MemoryTool(self.memory, self.workspace)
+        memory_tool.load_from_disk()
+        self.registry.register(memory_tool)
+
     def _append_message(self, message: dict[str, Any]) -> None:
         """Single funnel for conversation mutation — keeps the session
         journal complete without instrumenting every call site."""

@@ -242,6 +242,12 @@ class SubagentRunner:
             all_tools = [t for t in all_tools if t in defn.tools]
         if defn.disallowed_tools:
             all_tools = [t for t in all_tools if t not in defn.disallowed_tools]
+        # Anti-recursion invariant (structural, from my-pi-agent tasks.py):
+        # children can NEVER re-delegate or touch memory — enforced by
+        # filtering, not by prompt-level trust.
+        for forbidden in ("task", "memory"):
+            if forbidden in all_tools:
+                all_tools.remove(forbidden)
 
         for tool_name in all_tools:
             try:
