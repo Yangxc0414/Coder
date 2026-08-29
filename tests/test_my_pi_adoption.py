@@ -254,3 +254,83 @@ class TestJournalTornLine:
         j.log_message({"role": "user", "content": "x"})
         j.close()
         assert len(load_journal(tmp_path / "ok.jsonl")["messages"]) == 1
+
+
+class TestPolicyIntegration:
+    """CRITICAL regression: new tools must pass PolicyGate in every mode.
+
+    Found by framework audit: GOAL mode (the default) denied task/memory as
+    'Unknown or unregistered tool' — unit tests called execute() directly
+    and never went through the gate. Integration seam AGAIN."""
+
+    def test_goal_mode_allows_task_and_memory_with_log(self):
+        from coder_agent.policy import PolicyGate
+
+        p = PolicyGate()
+        for tool, args in (("task", {"prompt": "x"}), ("memory", {"action": "list"})):
+            r = p.check(tool, args, mode=AgentMode.GOAL)
+            assert r.approved, f"{tool} denied in GOAL: {r.reason}"
+            assert r.needs_log, f"{tool} should be logged"
+
+    def test_full_mode_allows(self):
+        from coder_agent.policy import PolicyGate
+
+        p = PolicyGate()
+        for tool, args in (("task", {"prompt": "x"}), ("memory", {"action": "list"})):
+            assert p.check(tool, args, mode=AgentMode.FULL).approved
+
+    def test_plan_mode_still_blocks(self):
+        """Conservative: children may write (test_specialist), so delegation
+        is not read-only even though researcher is."""
+        from coder_agent.policy import PolicyGate
+
+        p = PolicyGate()
+        assert not p.check("task", {"prompt": "x"}, mode=AgentMode.PLAN).approved
+        assert not p.check("memory", {"action": "list"}, mode=AgentMode.PLAN).approved
+
+    def test_goal_mode_full_loop_through_policy(self, tmp_path: Path):
+        """The exact integration path unit tests missed: tool call →
+        PolicyGate → execute → result, inside a real agent loop."""
+        from coder_agent.memory import Memory
+
+        class OneShotMemoryLLM:
+            model = "mock"
+
+            def __init__(self):
+                self.calls = 0
+
+            def chat(self, messages, tools=None, max_tokens=4096):
+                self.calls += 1
+                if self.calls == 1:
+                    return LLMResponse(
+                        content="",
+                        tool_calls=[{"id": "t1", "name": "memory",
+                                     "arguments": json.dumps({
+                                         "action": "remember",
+                                         "key": "偏好", "content": "简洁回复"})}],
+                        finish_reason="tool_calls", usage=None)
+                return LLMResponse(content="记住了", tool_calls=None,
+                                   finish_reason="stop", usage=None)
+
+        reg = ToolRegistry()
+        reg.register(ReadFileTool(tmp_path))  # goal-mode ALLOW tool present
+        agent = Agent(
+            llm_client=OneShotMemoryLLM(), registry=reg,
+            workspace=tmp_path, mode=AgentMode.GOAL,
+        )
+        answer = agent.run("记住我的偏好")
+        assert answer == "记住了"
+        assert "偏好" in agent.memory.long_term  # policy did not block it
+        assert (tmp_path / ".coder_memory.md").exists()
+
+    def test_shared_registry_no_duplicate_crash(self, tmp_path: Path):
+        """Two Agents sharing one registry must not crash on re-register."""
+        from coder_agent.memory import Memory
+
+        shared = ToolRegistry()
+        a1 = Agent(llm_client=LLMClient(model="mock"), registry=shared,
+                   workspace=tmp_path, mode=AgentMode.GOAL)
+        a2 = Agent(llm_client=LLMClient(model="mock"), registry=shared,
+                   workspace=tmp_path, mode=AgentMode.GOAL)
+        assert "task" in shared and "memory" in shared
+        assert a1.registry is a2.registry

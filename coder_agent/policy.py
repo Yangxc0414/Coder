@@ -40,7 +40,10 @@ class PolicyGate:
     ALLOW_LIST = frozenset({"read_file", "list_files", "search_text"})
 
     # Tools that are allowed but should be logged
-    LOG_LIST = frozenset({"write_file"})
+    # memory: writes only to .coder_memory.md (own bookkeeping)
+    # task: delegation — severity depends on the child subagent; allowed
+    #       with logging, and PLAN mode still blocks it (children may write)
+    LOG_LIST = frozenset({"write_file", "memory", "task"})
 
     # Dangerous command substrings (checked inside run_command).
     # Single source of truth: RunCommandTool.DANGEROUS_PATTERNS — the two
