@@ -178,7 +178,7 @@ class ListFilesTool(Tool):
                 str(p.relative_to(self.workspace))
                 for p in target.rglob("*")
                 # 不把自己的运行产物当工作区内容展示
-                if ".coder_" not in p.parts
+                if not any(part.startswith(".coder_") for part in p.parts)
             )
             if not entries:
                 return ToolResult(output="(directory is empty)")
