@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .tools.shell import RunCommandTool
+
 if TYPE_CHECKING:
     from .mode import AgentMode
 
@@ -40,14 +42,11 @@ class PolicyGate:
     # Tools that are allowed but should be logged
     LOG_LIST = frozenset({"write_file"})
 
-    # Dangerous command substrings (checked inside run_command)
-    DANGEROUS_COMMAND_PATTERNS = frozenset([
-        "rm -rf /",
-        "mkfs",
-        "dd if=",
-        ":(){:|:&};:",
-        "> /",
-    ])
+    # Dangerous command substrings (checked inside run_command).
+    # Single source of truth: RunCommandTool.DANGEROUS_PATTERNS — the two
+    # lists once drifted (PolicyGate lacked sudo rules), letting
+    # `sudo cat /etc/shadow` pass the gate layer. Never re-duplicate.
+    DANGEROUS_COMMAND_PATTERNS = frozenset(RunCommandTool.DANGEROUS_PATTERNS)
 
     def check(
         self,
