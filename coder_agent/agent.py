@@ -639,6 +639,10 @@ class Agent:
             MAX_CONSECUTIVE_FORMAT_ERRORS,
             error,
         )
+        self.trace.record(
+            self._n_steps, "format_error",
+            error=str(error)[:200], attempt=self._n_format_errors,
+        )
         correction = (
             f"Your previous response had a format error: {error}. "
             "Please fix it and call the tools again."
