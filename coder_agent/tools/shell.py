@@ -62,6 +62,9 @@ class RunCommandTool(Tool):
     ]
 
     MAX_OUTPUT_CHARS = 8000
+    # timeout 钳制：模型传 timeout=999999 会让主循环无限卡住
+    # （实测 sleep 命令完全阻塞调度）
+    MAX_TIMEOUT_SECONDS = 300
 
     def __init__(self, workspace: Path) -> None:
         self.workspace = Path(workspace).resolve()
@@ -80,6 +83,17 @@ class RunCommandTool(Tool):
 
         try:
             cwd = (self.workspace / cwd_str).resolve()
+            # cwd 逃逸校验（与 read_file 的 commonpath 同源）：Path 拼接
+            # 绝对路径会直接替换工作区——实测 agent 可借此在外部目录
+            # （甚至用户主目录）执行命令，击穿工作区隔离。
+            import os as _os
+            try:
+                inside = _os.path.commonpath(
+                    [str(self.workspace), str(cwd)]) == str(self.workspace)
+            except ValueError:
+                inside = False  # 跨盘符无法比较 → 视为逃逸
+            if not inside:
+                return ToolResult(error=f"cwd escapes workspace: {cwd_str[:100]}")
 
             if background:
                 return self._run_background(command, cwd)

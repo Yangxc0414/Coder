@@ -19,9 +19,10 @@ from coder_agent.extensions.base import SubagentRequest
 from coder_agent.journal import load_journal, SessionJournal
 from coder_agent.llm.client import LLMClient, LLMResponse
 from coder_agent.mode import AgentMode
-from coder_agent.tools.filesystem import ReadFileTool
+from coder_agent.tools.filesystem import ListFilesTool, ReadFileTool, WriteFileTool
 from coder_agent.tools.memory_tool import MemoryTool
 from coder_agent.tools.registry import ToolRegistry
+from coder_agent.tools.shell import RunCommandTool
 from coder_agent.tools.task_tool import TaskTool
 
 
@@ -29,7 +30,7 @@ class TestTaskTool:
     """P1: delegation exposed as a tool — reachable by the model at last."""
 
     def _agent_with_tools(self, tmp_path: Path, llm):
-        from coder_agent.tools.filesystem import ReadFileTool
+        from coder_agent.tools.filesystem import ListFilesTool, ReadFileTool, WriteFileTool
 
         reg = ToolRegistry()
         reg.register(ReadFileTool(tmp_path))
@@ -472,3 +473,90 @@ class TestMemoryInjectionHardening:
         entry_line = [l for l in seg.splitlines() if "k:" in l][0]
         assert "do evil" in entry_line  # 内容仍在（信息不丢）
         assert "untrusted" in seg       # 明确标记为不可信数据
+
+
+class TestRunCommandIsolation:
+    """审计发现：cwd 参数的绝对路径在 Path 拼接时会直接替换工作区，
+    agent 可借此在任意外部目录（含用户主目录）执行命令——工作区
+    隔离被参数面击穿。修复：commonpath 校验 + timeout 钳制。"""
+
+    def test_cwd_absolute_escape_blocked(self):
+        tool = RunCommandTool(Path("."))
+        r = tool.execute({"command": "pwd", "cwd": str(Path.home())})
+        assert not r.success
+        assert "escapes workspace" in r.error
+
+    def test_cwd_traversal_blocked(self, tmp_path: Path):
+        tool = RunCommandTool(tmp_path)
+        r = tool.execute({"command": "pwd", "cwd": "../.."})
+        assert not r.success
+        assert "escapes workspace" in r.error
+
+    def test_cwd_inside_workspace_ok(self, tmp_path: Path):
+        (tmp_path / "sub").mkdir()
+        tool = RunCommandTool(tmp_path)
+        r = tool.execute({"command": "echo ok", "cwd": "sub"})
+        assert r.success
+
+    def test_timeout_clamped(self):
+        assert RunCommandTool.MAX_TIMEOUT_SECONDS == 300
+
+    def test_background_cwd_escape_blocked(self, tmp_path: Path):
+        tool = RunCommandTool(tmp_path)
+        r = tool.execute({"command": "echo x", "cwd": str(Path.home()), "background": True})
+        assert not r.success
+
+
+class TestWorkspaceContainment:
+    """CRITICAL 回归：startswith 前缀绕过（工作区 .../Coder 可前缀匹配
+    兄弟目录 .../Coder-anything）。手册宣称 commonpath，代码此前实际
+    用 startswith——文档与代码不一致被对抗测试揭穿。"""
+
+    def _sibling_setup(self, tmp_path: Path):
+        ws = tmp_path / "ws"
+        secret = tmp_path / "ws-secret"
+        ws.mkdir()
+        secret.mkdir()
+        (secret / "secret.txt").write_text("TOP SECRET")
+        return ws, secret
+
+    def test_read_prefix_bypass_blocked(self, tmp_path: Path):
+        ws, secret = self._sibling_setup(tmp_path)
+        tool = ReadFileTool(ws)
+        r = tool.execute({"path": "../ws-secret/secret.txt"})
+        assert not r.success
+        assert "TOP SECRET" not in (r.output or "")
+
+    def test_write_prefix_bypass_blocked(self, tmp_path: Path):
+        ws, secret = self._sibling_setup(tmp_path)
+        tool = WriteFileTool(ws)
+        r = tool.execute({"path": "../ws-secret/evil.txt", "content": "x"})
+        assert not r.success
+        assert not (secret / "evil.txt").exists()
+
+    def test_list_prefix_bypass_blocked(self, tmp_path: Path):
+        ws, secret = self._sibling_setup(tmp_path)
+        tool = ListFilesTool(ws)
+        r = tool.execute({"path": "../ws-secret"})
+        assert not r.success
+
+    def test_cross_drive_treated_as_escape(self, tmp_path: Path):
+        """commonpath 跨盘符抛 ValueError → 必须视为逃逸而非崩溃。"""
+        tool = ReadFileTool(tmp_path)
+        other_drive = "C:/Windows/win.ini" if tmp_path.drive != "C:" else "D:/x.txt"
+        r = tool.execute({"path": other_drive})
+        assert not r.success
+
+    def test_cwd_cross_drive_consistent_error(self, tmp_path: Path):
+        tool = RunCommandTool(tmp_path)
+        other_drive = "C:/Windows/Temp" if tmp_path.drive != "C:" else "D:/Temp"
+        r = tool.execute({"command": "echo x", "cwd": other_drive})
+        assert not r.success
+        assert "escapes workspace" in r.error  # 跨盘符也用统一错误
+
+    def test_inside_workspace_still_works(self, tmp_path: Path):
+        (tmp_path / "ok.txt").write_text("fine")
+        tool = ReadFileTool(tmp_path)
+        r = tool.execute({"path": "ok.txt"})
+        assert r.success
+        assert r.output == "fine"

@@ -7,6 +7,28 @@ from pathlib import Path
 from .base import Tool, ToolResult
 
 
+def _resolve_within(workspace: Path, path_str: str) -> Path:
+    """Resolve *path_str* and enforce workspace containment.
+
+    commonpath (not startswith!) — startswith has the sibling-prefix
+    bypass: workspace ".../Coder" prefix-matches ".../Coder-anything",
+    letting the agent read/write files outside the workspace. Found by
+    adversarial testing against our own claimed defense.
+    Cross-drive paths (C: vs D:) can't share a commonpath — treat as escape.
+    """
+    import os as _os
+
+    resolved = (workspace / Path(path_str)).resolve()
+    try:
+        inside = _os.path.commonpath(
+            [str(workspace), str(resolved)]) == str(workspace)
+    except ValueError:
+        inside = False
+    if not inside:
+        raise PermissionError(f"Path escapes workspace: {path_str}")
+    return resolved
+
+
 class ReadFileTool(Tool):
     name = "read_file"
     description = (
@@ -84,13 +106,7 @@ class ReadFileTool(Tool):
             return ToolResult(error=f"read_file failed: {e}")
 
     def _resolve_path(self, path_str: str) -> Path:
-        raw = Path(path_str)
-        resolved = (self.workspace / raw).resolve()
-        if not str(resolved).startswith(str(self.workspace)):
-            raise PermissionError(
-                f"Path escapes workspace: {path_str}"
-            )
-        return resolved
+        return _resolve_within(self.workspace, path_str)
 
 
 class WriteFileTool(Tool):
@@ -136,13 +152,7 @@ class WriteFileTool(Tool):
             return ToolResult(error=f"write_file failed: {e}")
 
     def _resolve_path(self, path_str: str) -> Path:
-        raw = Path(path_str)
-        resolved = (self.workspace / raw).resolve()
-        if not str(resolved).startswith(str(self.workspace)):
-            raise PermissionError(
-                f"Path escapes workspace: {path_str}"
-            )
-        return resolved
+        return _resolve_within(self.workspace, path_str)
 
 
 class ListFilesTool(Tool):
@@ -210,10 +220,4 @@ class ListFilesTool(Tool):
             return ToolResult(error=f"list_files failed: {e}")
 
     def _resolve_path(self, path_str: str) -> Path:
-        raw = Path(path_str)
-        resolved = (self.workspace / raw).resolve()
-        if not str(resolved).startswith(str(self.workspace)):
-            raise PermissionError(
-                f"Path escapes workspace: {path_str}"
-            )
-        return resolved
+        return _resolve_within(self.workspace, path_str)
