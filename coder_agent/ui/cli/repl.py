@@ -286,10 +286,21 @@ class CoderRepl:
             f"[dim]Session journaled: {journal.path} — use /resume {journal.path} to continue it later[/dim]"
         )
 
+    def _resolve_journal_path(self, path: str) -> Path:
+        """Resolve a /resume path: ~ expansion, and bare filenames are
+        looked up in the default session directory."""
+        p = Path(path).expanduser()
+        if not p.exists() and p.parent == Path("."):
+            fallback = Path.home() / ".coder_sessions" / p.name
+            if fallback.exists():
+                return fallback
+        return p
+
     def _run_resumed(self, path: str, instruction: str) -> None:
         """Restore a session journal and continue it (append to same file)."""
+        resolved_path = self._resolve_journal_path(path)
         try:
-            restored = load_journal(path)
+            restored = load_journal(resolved_path)
         except (OSError, json.JSONDecodeError) as e:
             self._console.print(f"[red]✗ Cannot load journal {path}: {e}[/red]")
             return
@@ -297,7 +308,7 @@ class CoderRepl:
             self._console.print(f"[red]✗ Journal has no messages: {path}[/red]")
             return
 
-        journal = SessionJournal(path, append=True)
+        journal = SessionJournal(resolved_path, append=True)
         agent = self._build_agent(instruction, journal=journal)
         agent.messages = restored["messages"]
         replay_state(restored["messages"], agent.state)
