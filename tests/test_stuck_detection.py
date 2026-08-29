@@ -10,6 +10,7 @@ would false-positive on every normal edit-test loop.
 
 from __future__ import annotations
 
+from coder_agent.llm.client import LLMResponse
 from coder_agent.state import AgentState
 
 
@@ -83,3 +84,75 @@ class TestRepetitionRiskFallback:
         s.add_recent_action("run_command", "A")
         s.add_recent_action("run_command", "A")
         assert s.get_repetition_risk() is False
+
+
+class TestMaxStepsGracefulFinal:
+    """Improvement D: hitting the step limit must yield a model summary,
+    not a bare termination string (smolagents provide_final_answer)."""
+
+    class ConditionalLLM:
+        """Calls tools until the step-limit message appears, then answers."""
+
+        model = "mock"
+
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, tools=None, max_tokens=4096):
+            self.calls += 1
+            injected = any(
+                "Step limit reached" in (m.get("content") or "")
+                for m in messages if m.get("role") == "user"
+            )
+            if injected:
+                return LLMResponse(
+                    content="SUMMARY: read files, wrote fix, tests pending.",
+                    tool_calls=None, finish_reason="stop", usage=None,
+                )
+            return LLMResponse(
+                content="",
+                tool_calls=[{"id": "t1", "name": "list_files", "arguments": "{}"}],
+                finish_reason="tool_calls", usage=None,
+            )
+
+    def test_forced_final_answer_returned(self, tmp_path):
+        from coder_agent.agent import Agent
+        from coder_agent.mode import AgentMode
+        from coder_agent.tools.registry import ToolRegistry
+
+        llm = self.ConditionalLLM()
+        agent = Agent(
+            llm_client=llm, registry=ToolRegistry(), workspace=tmp_path,
+            mode=AgentMode.GOAL, max_steps=2,
+        )
+        answer = agent.run("long task")
+        assert answer.startswith("SUMMARY:")
+        assert "Step limit reached" in [
+            m.get("content") for m in agent.messages if m.get("role") == "user"
+        ][-1] or any(
+            "Step limit reached" in (m.get("content") or "")
+            for m in agent.messages
+        )
+
+    def test_stubborn_tool_caller_still_terminates(self, tmp_path):
+        from coder_agent.agent import Agent
+        from coder_agent.llm.client import LLMResponse
+        from coder_agent.mode import AgentMode
+        from coder_agent.tools.registry import ToolRegistry
+
+        class StubbornLLM:
+            model = "mock"
+
+            def chat(self, messages, tools=None, max_tokens=4096):
+                return LLMResponse(
+                    content="nope",
+                    tool_calls=[{"id": "t1", "name": "list_files", "arguments": "{}"}],
+                    finish_reason="tool_calls", usage=None,
+                )
+
+        agent = Agent(
+            llm_client=StubbornLLM(), registry=ToolRegistry(), workspace=tmp_path,
+            mode=AgentMode.GOAL, max_steps=2,
+        )
+        answer = agent.run("loop")
+        assert "maximum steps" in answer.lower()

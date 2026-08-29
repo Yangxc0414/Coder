@@ -396,6 +396,32 @@ class Agent:
                     )
                     return f"Agent terminated: {result.action}. {result.message or ''}"
 
+        # Step budget exhausted — give the model one forced final-answer
+        # round (smolagents' provide_final_answer pattern) instead of a bare
+        # termination string: 40 steps of work deserve a summary, not a stub.
+        self._append_message({
+            "role": "user",
+            "content": (
+                "Step limit reached. Stop calling tools and provide your final "
+                "answer now, summarizing what was accomplished and what remains."
+            ),
+        })
+        self._n_steps += 1
+        try:
+            response = self._query_llm()
+            if response.content and not response.tool_calls:
+                self.trace.record(
+                    self._n_steps, "final_answer",
+                    answer_preview=response.content[:300],
+                )
+                self.hooks.fire(AGENT_ENDED.with_data(
+                    steps=self._n_steps,
+                    final_state=self.state.to_status_prompt(),
+                ))
+                return response.content
+        except Exception as e:
+            logger.warning("Forced final answer failed: %s", e)
+
         self.hooks.fire(AGENT_ENDED.with_data(
             steps=self._n_steps,
             final_state=self.state.to_status_prompt(),
