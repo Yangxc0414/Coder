@@ -122,6 +122,8 @@ class Agent:
         self._token_budget = token_budget
         self._tokens_used = 0
         self._budget_notice_given = False
+        self._llm_max_tokens = 4096
+        self._length_escalated = False
         self.inspector = ContextInspector()
         self.messages: list[dict] = []
         self._n_steps = 0
@@ -185,6 +187,8 @@ class Agent:
         self._n_mutations = 0
         self._tokens_used = 0
         self._budget_notice_given = False
+        self._length_escalated = False
+        self._llm_max_tokens = 4096
         # 0, not None: a failed check with zero mutations means the failure
         # predates this task (pre-existing broken tests) — never retry it.
         self._verify_snapshot: int = 0
@@ -441,7 +445,30 @@ class Agent:
         response = self.llm.chat(
             messages=messages_for_api,
             tools=self.registry.list_tools(),
+            max_tokens=self._llm_max_tokens,
         )
+
+        # Length-truncation recovery (OneCode loop.py:586-615 pattern):
+        # a response cut off by max_tokens mid-answer used to surface as a
+        # JSON parse FormatError; retry once with doubled budget instead.
+        if (
+            response.finish_reason == "length"
+            and not response.tool_calls
+            and not self._length_escalated
+        ):
+            self._length_escalated = True
+            self._llm_max_tokens *= 2
+            logger.warning(
+                "Response truncated by max_tokens — retrying with %d",
+                self._llm_max_tokens,
+            )
+            self.trace.record(self._n_steps, "length_truncated")
+            response = self.llm.chat(
+                messages=messages_for_api,
+                tools=self.registry.list_tools(),
+                max_tokens=self._llm_max_tokens,
+            )
+
         # Build assistant message in the format the API expects.
         # Some providers (e.g. Agnes) require tool_calls to include
         # "type": "function" and an "index" field.
