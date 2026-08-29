@@ -72,6 +72,10 @@ class SessionJournal:
 def load_journal(path: str | Path) -> dict[str, Any]:
     """Replay a journal file.
 
+    Torn-line tolerant: a crash mid-write can leave a truncated final line;
+    it is dropped (my-pi-agent's session.py does the same for its JSONL).
+    Everything before the torn line is intact by append-only construction.
+
     Returns:
         {
             "messages": [message dicts in original order],
@@ -87,7 +91,17 @@ def load_journal(path: str | Path) -> dict[str, Any]:
             line = line.strip()
             if not line:
                 continue
-            obj = json.loads(line)
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                # 只可能是最后一行（append-only + 逐行 flush）；
+                # 中间行损坏则说明文件本身损坏，同样丢弃该行并告警
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Journal %s: 跳过损坏行: %.60s...", path, line
+                )
+                continue
             kind = obj.get("type")
             if kind == "message":
                 messages.append(obj["message"])
