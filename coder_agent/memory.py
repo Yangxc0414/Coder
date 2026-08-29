@@ -58,16 +58,26 @@ class Memory:
         return self.long_term.get(key)
 
     def get_summary(self) -> str:
-        """Generate a summary of recent memory for System Prompt injection."""
-        if not self.short_term:
-            return ""
+        """Generate a summary for System Prompt injection.
 
-        lines = []
-        for entry in self.short_term[-5:]:  # Last 5 actions
-            status = "✅" if entry.success else "❌"
-            lines.append(f"  {status} Step {entry.step}: {entry.tool}({entry.args_summary})")
+        Two sections: recent tool actions (short-term) + long-term facts the
+        model explicitly remembered via the memory tool. Long-term entries
+        are injected so remembered facts survive context compression.
+        """
+        parts = []
 
-        return "Recent actions:\n" + "\n".join(lines)
+        if self.short_term:
+            lines = []
+            for entry in self.short_term[-5:]:  # Last 5 actions
+                status = "✅" if entry.success else "❌"
+                lines.append(f"  {status} Step {entry.step}: {entry.tool}({entry.args_summary})")
+            parts.append("Recent actions:\n" + "\n".join(lines))
+
+        if self.long_term:
+            lines = [f"  - {k}: {str(v)[:100]}" for k, v in list(self.long_term.items())[-10:]]
+            parts.append("Long-term notes (model-remembered facts):\n" + "\n".join(lines))
+
+        return "\n".join(parts)
 
     @staticmethod
     def _summarize_args(tool_name: str, args: dict) -> str:
