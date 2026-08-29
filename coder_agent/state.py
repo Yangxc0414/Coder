@@ -34,6 +34,9 @@ class AgentState:
     recent_actions: list[tuple[str, str]] = field(default_factory=list)
     # Each entry: (tool_name, args_summary)
 
+    # Full outcomes (tool, args, result) for repetition-based stuck detection
+    recent_outcomes: list[tuple[str, str, str]] = field(default_factory=list)
+
     def mark_file_read(self, path: str) -> None:
         """Record that a file was read."""
         self.read_files.add(path)
@@ -48,6 +51,19 @@ class AgentState:
         """Add a recent action for loop detection."""
         self.recent_actions.append((tool_name, args_summary))
         # Keep only last 10
+
+    def add_tool_outcome(
+        self, tool_name: str, args_summary: str, result_summary: str
+    ) -> None:
+        """Record a full (tool, args, result) outcome for stuck detection.
+
+        The result component is what separates a productive iteration
+        (same command, different output — the workspace changed) from a
+        genuine stuck loop (same command, same failure, over and over).
+        """
+        self.recent_outcomes.append((tool_name, args_summary, result_summary))
+        if len(self.recent_outcomes) > 12:
+            del self.recent_outcomes[:-6]
         if len(self.recent_actions) > 10:
             self.recent_actions = self.recent_actions[-10:]
 
@@ -92,3 +108,36 @@ class AgentState:
                     file_counts[m.group(1)] = file_counts.get(m.group(1), 0) + 1
 
         return any(count >= 3 for count in file_counts.values())
+
+    def get_repetition_risk(self) -> bool:
+        """Stuck detection on (tool, args, RESULT) repetition — openhands
+        stuck_detection's insight: a loop is a repeated action AND repeated
+        observation. The same command with different results is productive
+        iteration (the workspace changed); the same command with the same
+        failure is being stuck. File-based churn detection (get_loop_risk)
+        misses loops that vary the file.
+
+        Uses recent_outcomes when available (agent records them after each
+        execution); falls back to recent_actions (args-only) otherwise.
+
+        Returns True if the same outcome appears 3+ times in the window,
+        or the last 3 outcomes are identical.
+        """
+        if self.recent_outcomes:
+            window = self.recent_outcomes[-6:]
+        else:
+            if len(self.recent_actions) < 3:
+                return False
+            window = [(t, a, "") for t, a in self.recent_actions[-6:]]
+
+        if len(window) < 3:
+            return False
+
+        # exact consecutive repeat: last 3 outcomes identical
+        if window[-1] == window[-2] == window[-3]:
+            return True
+
+        counts: dict[tuple, int] = {}
+        for outcome in window:
+            counts[outcome] = counts.get(outcome, 0) + 1
+        return any(c >= 3 for c in counts.values())

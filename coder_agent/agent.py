@@ -352,14 +352,20 @@ class Agent:
                 for pc in parsed:
                     self._execute_tool_call(pc)
 
-                # Loop detection
-                if self.state.get_loop_risk() and not self._loop_warning_injected:
+                # Loop detection: same-file churn (get_loop_risk) OR exact
+                # action repetition (get_repetition_risk — catches loops that
+                # vary the file but repeat the identical failing action)
+                if (
+                    (self.state.get_loop_risk() or self.state.get_repetition_risk())
+                    and not self._loop_warning_injected
+                ):
                     logger.warning("Loop detected, injecting guidance")
                     self._append_message({
                         "role": "user",
                         "content": (
-                            "You seem to be repeatedly operating on the same file(s). "
-                            "Consider reviewing your plan and trying a different approach."
+                            "You seem to be repeating the same actions without "
+                            "progress. Consider reviewing your plan and trying a "
+                            "different approach."
                         )
                     })
                     self._loop_warning_injected = True
@@ -480,6 +486,13 @@ class Agent:
             args=parsed.arguments,
             success=result.success,
             output=result.output or "",
+        )
+
+        # Full outcome for repetition-based stuck detection (action+observation)
+        self.state.add_tool_outcome(
+            parsed.tool_name,
+            str(parsed.arguments),
+            (result.output or result.error or "")[:200],
         )
 
         tool_msg: dict[str, Any] = {
