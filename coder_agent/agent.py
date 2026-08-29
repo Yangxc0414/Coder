@@ -129,6 +129,10 @@ class Agent:
         self._n_steps = 0
         self._n_format_errors = 0
         self._n_mutations = 0
+        # Command-failure adaptation (real-run finding: 13 consecutive
+        # failures with the same wrong approach — e.g. `python3` on Windows)
+        self._cmd_fail_streak = 0
+        self._cmd_hint_injected = False
         # 0, not None: a failed check with zero mutations means the failure
         # predates this task (pre-existing broken tests) — never retry it.
         self._verify_snapshot: int = 0
@@ -189,6 +193,8 @@ class Agent:
         self._budget_notice_given = False
         self._length_escalated = False
         self._llm_max_tokens = 4096
+        self._cmd_fail_streak = 0
+        self._cmd_hint_injected = False
         # 0, not None: a failed check with zero mutations means the failure
         # predates this task (pre-existing broken tests) — never retry it.
         self._verify_snapshot: int = 0
@@ -540,6 +546,40 @@ class Agent:
             success=result.success,
             output=result.output or "",
         )
+
+        # Command-failure streak tracking → adaptive strategy hint.
+        # Real-run finding: 13 consecutive failed commands with the SAME
+        # wrong approach (`python3` on Windows) — the model never switched
+        # strategy because nothing told it to.
+        if parsed.tool_name == "run_command":
+            if result.success:
+                self._cmd_fail_streak = 0
+            else:
+                self._cmd_fail_streak += 1
+                if self._cmd_fail_streak >= 3 and not self._cmd_hint_injected:
+                    self._cmd_hint_injected = True
+                    import sys as _sys
+                    platform_hint = (
+                        "Windows 环境没有 python3 命令，请使用 python；"
+                        if _sys.platform == "win32" else ""
+                    )
+                    self._append_message({
+                        "role": "user",
+                        "content": (
+                            f"命令已连续失败 {self._cmd_fail_streak} 次。"
+                            "请立即换一种策略，而不是重试同样的命令。常见对策:\n"
+                            f"1. {platform_hint}"
+                            "阻塞型服务（如 http.server）会一直占用直到超时——"
+                            "改用 run_command 的 background 参数启动，或改用非阻塞方式验证\n"
+                            "2. 把验证逻辑写成脚本文件再运行，输出更可控\n"
+                            "3. 输出重定向到文件（> out.txt）后用 read_file 查看\n"
+                            "4. 检查命令本身在该操作系统上是否存在"
+                        ),
+                    })
+                    self.trace.record(
+                        self._n_steps, "command_strategy_hint",
+                        streak=self._cmd_fail_streak,
+                    )
 
         # Full outcome for repetition-based stuck detection (action+observation)
         self.state.add_tool_outcome(
