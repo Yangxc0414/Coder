@@ -17,7 +17,7 @@ def create_builtin_mcp_tools(workspace) -> list[McpTool]:
             limit = args.get("limit", 10)
             result = subprocess.run(
                 ["git", "log", "--oneline", f"-{limit}"],
-                capture_output=True, text=True, timeout=10, cwd=str(workspace),
+                capture_output=True, text=True, timeout=30, cwd=str(workspace),
             )
             return {"output": result.stdout, "error": result.stderr or ""}
         except Exception as e:
@@ -27,7 +27,7 @@ def create_builtin_mcp_tools(workspace) -> list[McpTool]:
         try:
             result = subprocess.run(
                 ["git", "status", "--short"],
-                capture_output=True, text=True, timeout=10, cwd=str(workspace),
+                capture_output=True, text=True, timeout=30, cwd=str(workspace),
             )
             return {"output": result.stdout, "error": result.stderr or ""}
         except Exception as e:
@@ -37,7 +37,7 @@ def create_builtin_mcp_tools(workspace) -> list[McpTool]:
         try:
             result = subprocess.run(
                 ["git", "diff"],
-                capture_output=True, text=True, timeout=10, cwd=str(workspace),
+                capture_output=True, text=True, timeout=30, cwd=str(workspace),
             )
             return {"output": result.stdout, "error": result.stderr or ""}
         except Exception as e:
