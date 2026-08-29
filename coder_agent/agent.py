@@ -536,8 +536,10 @@ class Agent:
         elif parsed.tool_name == "write_file":
             self.state.mark_file_modified(parsed.arguments.get("path", ""))
 
-        # Track workspace mutations — verification retries are gated on this
-        if parsed.tool_name in ("write_file", "run_command"):
+        # Track workspace mutations — verification retries are gated on this.
+        # task 也计入：委派对父代理不透明，子代理可能写文件；漏计会让
+        # 子代理引入的变更绕过验证重试门控（采纳 task 工具后的新交互）。
+        if parsed.tool_name in ("write_file", "run_command", "task"):
             self._n_mutations += 1
 
         # Policy check

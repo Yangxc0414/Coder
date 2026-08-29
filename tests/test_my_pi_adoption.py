@@ -377,3 +377,53 @@ class TestSelfArtifactPollution:
         r = tool.execute({"prompt": "x"})
         assert not r.success
         assert "task delegation failed" in r.error
+
+
+class TestDelegationGating:
+    """采纳 task 工具后的新交互：委派必须计入 mutation 计数，
+    否则子代理引入的变更会绕过验证重试门控。"""
+
+    def test_delegation_counts_as_mutation(self, tmp_path: Path):
+        class DelegateLLM:
+            model = "mock"
+            def __init__(self):
+                self.calls = 0
+            def chat(self, messages, tools=None, max_tokens=4096):
+                self.calls += 1
+                if self.calls == 1:
+                    return LLMResponse(content="", tool_calls=[
+                        {"id": "t1", "name": "task",
+                         "arguments": '{"prompt": "analyze", "subagent_type": "researcher"}'}],
+                        finish_reason="tool_calls", usage=None)
+                return LLMResponse(content="done", tool_calls=None,
+                                   finish_reason="stop", usage=None)
+
+        class FakeRunner:
+            def run(self, request):
+                from coder_agent.extensions.base import SubagentResult
+                return SubagentResult(subagent_type=request.subagent_type,
+                                      final_output="report", steps_used=1)
+
+        agent = Agent(llm_client=DelegateLLM(), registry=ToolRegistry(),
+                      workspace=tmp_path, mode=AgentMode.GOAL)
+        # 用假 runner 替换（隔离：不真的跑子代理）
+        import coder_agent.tools.task_tool as tt
+        agent.registry.get("task")._runner = FakeRunner()
+        agent.run("delegate it")
+        assert agent._n_mutations == 1  # 委派已计入
+
+
+class TestReportCap:
+    def test_long_report_truncated(self, tmp_path: Path):
+        from coder_agent.tools.task_tool import TaskTool
+
+        class BigReportRunner:
+            def run(self, request):
+                from coder_agent.extensions.base import SubagentResult
+                return SubagentResult(subagent_type="researcher",
+                                      final_output="r" * 50_000, steps_used=2)
+
+        tool = TaskTool(BigReportRunner())
+        r = tool.execute({"prompt": "x"})
+        assert len(r.output) < TaskTool.MAX_REPORT_CHARS + 400
+        assert "报告截断" in r.output

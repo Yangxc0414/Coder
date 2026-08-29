@@ -43,6 +43,9 @@ class TaskTool(Tool):
         "required": ["prompt"],
     }
 
+    # 子代理报告封顶：超长报告全量进入父上下文会让委派反而膨胀上下文
+    MAX_REPORT_CHARS = 12_000
+
     def __init__(self, runner) -> None:
         # runner: coder_agent.extensions.base.SubagentRunner（避免循环导入，鸭子类型）
         self._runner = runner
@@ -65,4 +68,10 @@ class TaskTool(Tool):
         output = (
             f"[{result.subagent_type} 报告] (耗时 {result.steps_used} 步)\n{result.final_output}"
         )
+        if len(output) > self.MAX_REPORT_CHARS:
+            output = (
+                output[: self.MAX_REPORT_CHARS]
+                + f"\n[... 报告截断：原始 {len(output)} 字符——如需完整细节，"
+                f"请用后续交互向子代理追问具体片段]"
+            )
         return ToolResult(output=output)
