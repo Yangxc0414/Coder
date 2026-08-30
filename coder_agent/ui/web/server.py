@@ -196,6 +196,18 @@ def api_extensions():
     return get_manager().extensions_info()
 
 
+class ExtToggleRequest(BaseModel):
+    kind: str      # "skill" | "mcp"
+    name: str      # 工具名（如 skill_code_review / mcp_git_git_log）
+    enabled: bool
+
+
+@app.post("/api/extensions/toggle")
+def api_extensions_toggle(req: ExtToggleRequest):
+    """启用/禁用扩展（持久化到 ~/.coder_config.json，下次运行生效）。"""
+    return get_manager().toggle_extension(req.kind, req.name, req.enabled)
+
+
 @app.get("/api/models")
 def api_models():
     # 复用 LLMClient 的配置解析（用户配置 > 环境变量）与 HTTP 客户端

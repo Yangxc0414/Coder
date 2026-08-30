@@ -357,6 +357,17 @@
   </form>
 </main>
 
+<!-- 扩展管理模态框（Skills / MCP 启用禁用） -->
+<div id="extModal" class="modal-overlay" onclick="if(event.target===this)closeExtModal()">
+  <div class="modal-content" style="max-width:640px;max-height:85%;display:flex;flex-direction:column;">
+    <div class="modal-header"><b>🧩 扩展管理（Skills / MCP）</b><button class="modal-close" onclick="closeExtModal()">✕</button></div>
+    <div style="font-size:11px;color:var(--faint);margin-bottom:10px;">
+      禁用后模型不再看到该工具（下次运行生效）；可随时重新启用。
+    </div>
+    <div id="extBody" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:14px;"></div>
+  </div>
+</div>
+
 <div id="configModal" class="modal-overlay" onclick="if(event.target===this)closeConfigModal()">
   <div class="modal-content" style="max-width:460px;">
     <div class="modal-header"><b>⚙ 模型与 API 配置</b><button class="modal-close" onclick="closeConfigModal()">✕</button></div>
@@ -375,6 +386,9 @@
       <label>API Key</label>
       <input type="password" id="cfg-apikey" placeholder="sk-...">
       <div class="config-hint" id="cfg-keyhint"></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:4px;">
+      <button class="header-btn" onclick="openExtModal()">🧩 扩展管理（Skills / MCP）</button>
     </div>
     <div style="margin:16px 0;border-top:1px solid var(--border);padding-top:14px;">
       <b style="font-size:13px;color:var(--text);">🧠 上下文管理</b>
@@ -1626,6 +1640,61 @@ async function openConfigModal() {
   document.getElementById("configModal").classList.add("show");
 }
 function closeConfigModal() { document.getElementById("configModal").classList.remove("show"); }
+
+/* ═══════════ 扩展管理（Skills / MCP 启用禁用） ═══════════ */
+async function openExtModal() {
+  document.getElementById("extModal").classList.add("show");
+  await renderExtList();
+}
+function closeExtModal() { document.getElementById("extModal").classList.remove("show"); }
+async function renderExtList() {
+  const body = document.getElementById("extBody");
+  const d = await (await fetch("/api/extensions")).json();
+  let html = "";
+  // Skills
+  const skills = d.skills || [];
+  html += "<div class='act-section'><div class='as-title'>🎓 Skills (" + skills.length + ")</div>";
+  skills.forEach(s => {
+    html += extRow("skill", s);
+  });
+  html += "</div>";
+  // MCP（按服务器分组）
+  const mcp = d.mcp || {};
+  Object.keys(mcp).forEach(srv => {
+    html += "<div class='act-section'><div class='as-title'>🔌 MCP · " + escHtml(srv) + " (" + mcp[srv].length + ")</div>";
+    mcp[srv].forEach(t => { html += extRow("mcp", t); });
+    html += "</div>";
+  });
+  body.innerHTML = html;
+  // 绑定开关
+  body.querySelectorAll(".ext-toggle").forEach(btn => {
+    btn.onclick = async () => {
+      const kind = btn.dataset.kind, name = btn.dataset.name;
+      const enabled = btn.dataset.enabled === "1";
+      const r = await fetch("/api/extensions/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, name, enabled: !enabled })
+      });
+      const d = await r.json();
+      if (d.ok) await renderExtList();
+    };
+  });
+}
+function extRow(kind, item) {
+  const enabled = item.enabled !== false;
+  return '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;' +
+    (enabled ? "" : "opacity:.5;") + 'border-bottom:1px solid var(--border);">' +
+    '<div style="flex:1;min-width:0;">' +
+    '<span style="color:var(--accent);font-family:Consolas,monospace;font-size:12px;">' + escHtml(item.name) + '</span>' +
+    (enabled ? "" : ' <span style="color:var(--err);font-size:10px;">已禁用</span>') +
+    '<div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' +
+    escHtml(item.description) + '</div></div>' +
+    '<button class="header-btn ext-toggle" data-kind="' + kind + '" data-name="' + escHtml(item.name) +
+    '" data-enabled="' + (enabled ? 1 : 0) + '" style="flex-shrink:0;' +
+    (enabled ? "" : "border-color:var(--ok);color:var(--ok);") + '">' +
+    (enabled ? "禁用" : "启用") + '</button></div>';
+}
 async function saveConfig() {
   const model = document.getElementById("cfg-model").value.trim();
   const baseUrl = document.getElementById("cfg-baseurl").value.trim();

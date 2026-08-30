@@ -78,7 +78,7 @@ class TestBuiltInSkills:
 
     def test_get_builtin_skills(self):
         skills = get_builtin_skills()
-        assert len(skills) == 11
+        assert len(skills) == 17
 
     def test_code_review_skill(self):
         skills = get_builtin_skills()

@@ -487,6 +487,7 @@ class RunManager:
         """
         from coder_agent.mode import AgentMode
         registry = create_default_registry(self.workspace, AgentMode(self.mode))
+        disabled_skills, disabled_mcp = self._disabled_extensions()
         specs = []
         counts = {"core": 0, "skill": 0, "mcp": 0}
         for schema in registry.list_tools():
@@ -494,8 +495,12 @@ class RunManager:
             name = fn.get("name", "?")
             if name.startswith("skill_"):
                 category = "skill"
+                if name in disabled_skills:
+                    continue
             elif name.startswith("mcp_"):
                 category = "mcp"
+                if name in disabled_mcp:
+                    continue
             else:
                 category = "core"
             counts[category] += 1
@@ -505,14 +510,37 @@ class RunManager:
                           "parameters": fn.get("parameters", {})})
         return {"tools": specs, "counts": counts}
 
+    def _disabled_extensions(self) -> tuple[set, set]:
+        """从配置读取被禁用的扩展（skills / mcp 工具名集合）。"""
+        cfg = load_config()
+        return (set(cfg.get("disabled_skills") or []),
+                set(cfg.get("disabled_mcp") or []))
+
+    def toggle_extension(self, kind: str, name: str, enabled: bool) -> dict:
+        """启用/禁用扩展（skill 或 mcp 工具），持久化到 ~/.coder_config.json。"""
+        if kind not in ("skill", "mcp"):
+            return {"ok": False, "error": "kind 必须为 skill 或 mcp"}
+        cfg = load_config()
+        key = "disabled_skills" if kind == "skill" else "disabled_mcp"
+        disabled = set(cfg.get(key) or [])
+        if enabled:
+            disabled.discard(name)
+        else:
+            disabled.add(name)
+        cfg[key] = sorted(disabled)
+        save_config(cfg)
+        return {"ok": True, "kind": kind, "name": name, "enabled": enabled}
+
     def extensions_info(self) -> dict:
         """扩展系统详情：Skills 与 MCP 工具的定义（/skills /mcp 数据源）。
 
         直接从 extensions 模块读取真实定义（描述/何时使用/参数/服务器），
-        与模型看到的工具 schema 同源。
+        与模型看到的工具 schema 同源；被禁用的扩展标记 enabled=False。
         """
         from coder_agent.extensions.skills.builtin import get_builtin_skills
         from coder_agent.extensions.mcp.builtins import create_builtin_mcp_tools
+
+        disabled_skills, disabled_mcp = self._disabled_extensions()
 
         skills = []
         for s in get_builtin_skills():
@@ -527,6 +555,7 @@ class RunManager:
                 "when_to_use": when.strip()[:100],
                 "parameters": s.parameters,
                 "allowed_tools": list(getattr(s, "allowed_tools", ()) or ()),
+                "enabled": s.name not in disabled_skills,
             })
         mcp: dict[str, list[dict]] = {}
         for t in create_builtin_mcp_tools(self.workspace):
@@ -537,5 +566,6 @@ class RunManager:
                 "description": (t.description or "").replace(
                     f"[MCP: {server}] ", "")[:150],
                 "parameters": t.parameters,
+                "enabled": t.name not in disabled_mcp,
             })
         return {"skills": skills, "mcp": mcp}

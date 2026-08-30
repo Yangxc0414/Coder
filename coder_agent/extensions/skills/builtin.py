@@ -253,6 +253,131 @@ Write to README.md at the project root.""",
     context="inline",
 )
 
+# ── 热门 Skills（GitHub agent 生态流行，Anthropic skills 仓库同类）──────
+
+# Web Search Skill（网页搜索调研）
+WEB_SEARCH_SKILL = Skill(
+    name="web_search",
+    description="""Search the web for information, documentation, or current facts.
+
+    Performs a web search for the given query and summarizes the
+    most relevant results with sources.""",
+    command="""Search the web for: {target}
+1. Perform the search (use run_command with curl or a search API)
+2. Fetch 2-3 of the most relevant results
+3. Extract key facts with sources
+4. Summarize findings with URLs
+
+If no search tool is available, use curl with a search endpoint.""",
+    when_to_use="When the task needs current information, docs, or external facts",
+    allowed_tools=("run_command", "read_file", "write_file"),
+    context="inline",
+)
+
+# Read Docs Skill（库/项目文档学习——Claude Code 最火的 skill 类型）
+READ_DOCS_SKILL = Skill(
+    name="read_docs",
+    description="""Learn how to use a library or framework from its documentation.
+
+    Finds and reads the relevant docs (README, API reference, examples)
+    for {target} and extracts the usage patterns needed for the task.""",
+    command="""Learn the documentation for {target}.
+1. Locate docs: README.md, docs/ folder, or the library's doc site
+2. Read the getting-started section and relevant API reference
+3. Find concrete usage examples
+4. Summarize: install, import, key APIs, common pitfalls
+
+Return a concise usage cheat-sheet the task can follow.""",
+    when_to_use="Before using an unfamiliar library or framework API",
+    allowed_tools=("read_file", "search_text", "run_command", "list_files"),
+    context="inline",
+)
+
+# DOCX Writer Skill（Word 文档创建——Anthropic docx skill 同类）
+DOCX_WRITER_SKILL = Skill(
+    name="docx_writer",
+    description="""Create or edit Microsoft Word (.docx) documents.
+
+    Generates a Word document with headings, paragraphs, tables,
+    and lists using python-docx, or edits an existing document.""",
+    command="""Create/edit a Word document for {target}.
+1. Check python-docx availability (run_command: python -c "import docx")
+2. Write a Python script using python-docx that produces the document:
+   - Title + headings (add_heading)
+   - Paragraphs (add_paragraph)
+   - Tables (add_table) when data is tabular
+   - Lists (add_paragraph with styles)
+3. Run the script to generate the .docx file
+4. Verify the file exists and report its path
+
+Keep formatting simple and clean.""",
+    when_to_use="When the user needs a .docx Word document",
+    allowed_tools=("read_file", "write_file", "run_command"),
+    context="inline",
+)
+
+# PDF Processor Skill（PDF 处理——Anthropic pdf skill 同类）
+PDF_PROCESSOR_SKILL = Skill(
+    name="pdf_processor",
+    description="""Process PDF files: extract text, summarize, or merge/split.
+
+    Uses Python (pypdf/PyPDF2 or pdfplumber) to extract text from
+    PDFs, summarize content, or merge/split pages.""",
+    command="""Process the PDF(s) in {target}.
+1. Check PDF library availability (run_command: python -c "import pypdf")
+2. Extract text: write a script using pypdf/pdfplumber to read pages
+3. Summarize the extracted content, or merge/split as requested
+4. Save outputs and report paths
+
+Handle encoding errors gracefully and report page counts.""",
+    when_to_use="When working with PDF files (extract, summarize, merge)",
+    allowed_tools=("read_file", "write_file", "run_command"),
+    context="inline",
+)
+
+# PPTX Builder Skill（PPT 创建——Anthropic pptx skill 同类）
+PPTX_BUILDER_SKILL = Skill(
+    name="pptx_builder",
+    description="""Create PowerPoint (.pptx) presentations.
+
+    Builds a slide deck with title slides, bullet content, and
+    simple layouts using python-pptx.""",
+    command="""Create a PowerPoint presentation for {target}.
+1. Check python-pptx availability (run_command: python -c "import pptx")
+2. Write a Python script using python-pptx:
+   - Title slide
+   - Content slides with bullets (layout 1: Title and Content)
+   - Consistent styling
+3. Run the script to generate the .pptx file
+4. Report the file path and slide count
+
+Keep it clean: title + 4-6 bullets per slide.""",
+    when_to_use="When the user needs a .pptx presentation",
+    allowed_tools=("read_file", "write_file", "run_command"),
+    context="inline",
+)
+
+# XLSX Analyst Skill（Excel 数据分析——Anthropic xlsx skill 同类）
+XLSX_ANALYST_SKILL = Skill(
+    name="xlsx_analyst",
+    description="""Analyze or edit Excel (.xlsx) spreadsheets.
+
+    Reads, filters, computes, and writes Excel data using openpyxl
+    or pandas, and reports insights.""",
+    command="""Analyze the spreadsheet in {target}.
+1. Check openpyxl/pandas availability (run_command: python -c "import openpyxl")
+2. Write a Python script to:
+   - Load the workbook and list sheets
+   - Compute requested statistics or filters
+   - Write results back or to a new sheet
+3. Run the script and report findings
+
+Report row/column counts and any computed insights.""",
+    when_to_use="When working with .xlsx/.csv data (analyze, edit, compute)",
+    allowed_tools=("read_file", "write_file", "run_command"),
+    context="inline",
+)
+
 
 def get_builtin_skills() -> list[Skill]:
     """Return all built-in skills."""
@@ -268,4 +393,10 @@ def get_builtin_skills() -> list[Skill]:
         FIX_BUG_SKILL,
         OPTIMIZE_PERFORMANCE_SKILL,
         GENERATE_README_SKILL,
+        WEB_SEARCH_SKILL,
+        READ_DOCS_SKILL,
+        DOCX_WRITER_SKILL,
+        PDF_PROCESSOR_SKILL,
+        PPTX_BUILDER_SKILL,
+        XLSX_ANALYST_SKILL,
     ]
