@@ -65,8 +65,8 @@ class TestDefaultRegistry:
 
     def test_extension_tool_count(self, tmp_path: Path):
         reg = create_default_registry(tmp_path, AgentMode.GOAL, with_extensions=True)
-        # 5 core + 5 mcp + 5 skills
-        assert len(reg.list_names()) == 15
+        # 5 core + 5 mcp + 11 skills
+        assert len(reg.list_names()) == 21
 
     def test_skill_executes_through_registry(self, tmp_path: Path):
         reg = create_default_registry(tmp_path, AgentMode.GOAL)
