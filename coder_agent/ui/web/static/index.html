@@ -121,7 +121,8 @@
   .turn-block .turn-badge { font-family: Consolas, monospace; color: var(--accent); }
   .turn-block .turn-count { color: var(--faint); font-size: 11px; margin-left: auto; }
   .turn-block .turn-body { padding: 6px 14px 12px; display: flex; flex-direction: column; gap: 8px; }
-  .turn-block .turn-user { align-self: flex-end; background: var(--user-bg); border-radius: 10px 10px 2px 10px; padding: 8px 12px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; max-width: 85%; }
+  .turn-block .turn-user { position: relative; align-self: flex-end; background: var(--user-bg); border-radius: 10px 10px 2px 10px; padding: 8px 12px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; max-width: 85%; }
+  .turn-block .turn-user .msg-ops { top: -10px; }
   .turn-block .turn-answer { align-self: flex-start; background: var(--answer-bg); border: 1px solid var(--answer-border); border-radius: 10px 10px 10px 2px; padding: 10px 14px; font-size: 13px; line-height: 1.6; max-width: 85%; }
 
   details.tool-details { align-self: stretch; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
@@ -460,9 +461,10 @@ function createTab(title) {
   const tab = {
     id, title: title || "新会话",
     runId: null, es: null, running: false,
-    turnEl: null, streamEl: null, pendingEl: null,
+    turnEl: null, turnStep: null, streamEl: null, pendingEl: null,
     stats: { tokens: 0, steps: 0, tools: {}, writes: [], reads: [] },
     viewingHistory: false, sessionFile: null, sessionData: null, sessionStats: null,
+    histTurns: null, histRendered: 0,
   };
   // feed 容器
   const feedEl = document.createElement("div");
@@ -682,8 +684,31 @@ function beginTurn(tab, step) {
   if (tab.turnEl) tab.turnEl.open = false;
   tab.feedEl.appendChild(det);
   tab.turnEl = det;
+  tab.turnStep = step;
   scrollFeedEl(tab.feedEl, true);
   return det.querySelector(".turn-body");
+}
+function addTurnUserMsg(tab, text) {
+  // 用户消息进入当前 turn 容器（带 hover 操作按钮）
+  if (!tab.turnEl) beginTurn(tab, (tab.stats.steps || 0) + 1);
+  const body = tab.turnEl.querySelector(".turn-body");
+  const u = document.createElement("div");
+  u.className = "turn-user";
+  u.textContent = text;
+  const ops = document.createElement("div");
+  ops.className = "msg-ops";
+  const rb = document.createElement("button");
+  rb.textContent = "↻ 重跑";
+  rb.onclick = () => submitTask(text);
+  const cb = document.createElement("button");
+  cb.textContent = "⧉ 复制";
+  cb.onclick = () => copyText(text);
+  ops.appendChild(rb);
+  ops.appendChild(cb);
+  u.appendChild(ops);
+  body.appendChild(u);
+  scrollFeedEl(tab.feedEl, true);
+  return u;
 }
 function appendToolToTurn(tab, ev) {
   if (!tab.turnEl) beginTurn(tab, ev.step || 1);
@@ -809,7 +834,14 @@ function onEvent(ev, tab) {
   } else if (ev.kind === "turn") {
     finalizeStream(tab);
     clearPending(tab);
-    beginTurn(tab, ev.step);
+    if (tab.turnStep === null) {
+      // submitTask 预建的容器：更新徽章为实际 step（不新建）
+      tab.turnStep = ev.step;
+      const badge = tab.turnEl ? tab.turnEl.querySelector(".turn-badge") : null;
+      if (badge) badge.textContent = "Turn " + ev.step;
+    } else if (ev.step !== tab.turnStep) {
+      beginTurn(tab, ev.step);  // 新的一步 → 新容器
+    }
     tab.stats.tokens = ev.tokens || 0;
     tab.stats.steps = ev.step;
     if (Tabs.active && Tabs.active.id === tab.id) {
@@ -879,18 +911,8 @@ async function submitTask(task) {
     const w = tab.feedEl.querySelector("#welcome");
     if (w) w.remove();
   }
-  const um = addTabMsg(tab, "user", task);
-  const ops = document.createElement("div");
-  ops.className = "msg-ops";
-  const rb = document.createElement("button");
-  rb.textContent = "↻ 重跑";
-  rb.onclick = () => submitTask(task);
-  const cb = document.createElement("button");
-  cb.textContent = "⧉ 复制";
-  cb.onclick = () => copyText(task);
-  ops.appendChild(rb);
-  ops.appendChild(cb);
-  um.appendChild(ops);
+  // 每次新发消息立即创建 turn 容器，用户消息属于该 turn
+  addTurnUserMsg(tab, task);
   inputEl.value = "";
   inputEl.style.height = "auto";
   setRunning(tab, true);
@@ -960,70 +982,109 @@ async function openSession(file) {
   document.getElementById("histTitle").textContent = "📜 " + (data.task || "历史会话");
   document.querySelectorAll(".session-item").forEach(el => el.classList.toggle("active", el.dataset.file === file));
   tab.feedEl.innerHTML = "";
-  tab.turnEl = null; tab.streamEl = null; tab.pendingEl = null;
+  tab.turnEl = null; tab.turnStep = null; tab.streamEl = null; tab.pendingEl = null;
   const turns = data.turns || [];
   if (!turns.length) {
     tab.feedEl.innerHTML = '<div style="color:var(--faint);font-size:12px;padding:20px;text-align:center;">该会话暂无消息记录</div>';
     return;
   }
-  turns.forEach((t, i) => {
-    const det = document.createElement("details");
-    det.className = "turn-block";
-    if (i === turns.length - 1) det.open = true;
-    const toolCount = (t.steps || []).filter(s => s.tool !== "_think").length;
-    det.innerHTML = "<summary><span class='turn-badge'>Turn " + (i + 1) + "</span>" +
-      "<span class='turn-count'>" + toolCount + " 个工具调用</span></summary>";
-    const body = document.createElement("div");
-    body.className = "turn-body";
-    if (t.user) {
-      const u = document.createElement("div");
-      u.className = "turn-user";
-      u.textContent = t.user;
-      body.appendChild(u);
-    }
-    (t.steps || []).forEach(st => {
-      if (st.tool === "_think") {
-        const th = document.createElement("div");
-        th.className = "think";
-        th.textContent = "│ " + st.args;
-        body.appendChild(th);
-        return;
-      }
-      const sd = document.createElement("details");
-      sd.className = "tool-details";
-      const mark = st.success ? '<span class="ok">✓</span>' : '<span class="fail">✗</span>';
-      sd.innerHTML = "<summary>" + mark + " <span class='tool-name'>" + escHtml(st.tool) + "</span></summary>";
-      const sb = document.createElement("div");
-      sb.className = "body";
-      const argsTxt = parseArgs(st.args);
-      if (argsTxt) {
-        const al = document.createElement("div");
-        al.className = "arg-label";
-        al.textContent = "参数";
-        sb.appendChild(al);
-        sb.appendChild(document.createTextNode(argsTxt));
-      }
-      if (st.result != null) {
-        const rl = document.createElement("div");
-        rl.className = st.success ? "res-label" : "err-label";
-        rl.textContent = st.success ? "结果" : "错误";
-        sb.appendChild(rl);
-        const rtxt = String(st.result);
-        sb.appendChild(document.createTextNode(rtxt.length > 2000 ? rtxt.slice(0, 2000) + "\n…[截断]" : rtxt));
-      }
-      sd.appendChild(sb);
-      body.appendChild(sd);
-    });
-    if (t.answer) {
-      const a = document.createElement("div");
-      a.className = "turn-answer";
-      a.appendChild(renderMarkdown(t.answer));
-      body.appendChild(a);
-    }
-    det.appendChild(body);
-    tab.feedEl.appendChild(det);
-  });
+  // 分页：先渲染最近 PAGE 条，顶部可加载更早（长会话上下翻页）
+  tab.histTurns = turns;
+  tab.histRendered = 0;
+  renderHistoryChunk(tab, 20);
   scrollFeedEl(tab.feedEl, true);
+}
+
+function renderHistoryChunk(tab, n) {
+  const turns = tab.histTurns;
+  if (!turns || tab.histRendered >= turns.length) return;
+  const to = turns.length - tab.histRendered;
+  const from = Math.max(0, to - n);
+  tab.histRendered += (to - from);
+  const frag = document.createDocumentFragment();
+  for (let i = from; i < to; i++) {
+    frag.appendChild(buildHistoryTurn(turns[i], i === turns.length - 1, i + 1));
+  }
+  const first = tab.feedEl.querySelector(".turn-block");
+  if (first) tab.feedEl.insertBefore(frag, first);
+  else tab.feedEl.appendChild(frag);
+  updateLoadMoreBtn(tab);
+}
+
+function updateLoadMoreBtn(tab) {
+  const remaining = (tab.histTurns || []).length - tab.histRendered;
+  let wrap = tab.feedEl.querySelector(".load-more");
+  if (remaining <= 0) { if (wrap) wrap.remove(); return; }
+  if (!wrap) {
+    wrap = document.createElement("div");
+    wrap.className = "load-more";
+    wrap.style.cssText = "text-align:center;padding:6px;";
+    const b = document.createElement("button");
+    b.className = "refresh-btn";
+    b.style.marginTop = "0";
+    b.onclick = () => renderHistoryChunk(tab, 20);
+    wrap.appendChild(b);
+    tab.feedEl.insertBefore(wrap, tab.feedEl.firstChild);
+  }
+  wrap.querySelector("button").textContent = "↑ 加载更早 " + remaining + " 条";
+}
+
+function buildHistoryTurn(t, isLast, index) {
+  const det = document.createElement("details");
+  det.className = "turn-block";
+  if (isLast) det.open = true;
+  const toolCount = (t.steps || []).filter(s => s.tool !== "_think").length;
+  det.innerHTML = "<summary><span class='turn-badge'>Turn " + index + "</span>" +
+    "<span class='turn-count'>" + toolCount + " 个工具调用</span></summary>";
+  const body = document.createElement("div");
+  body.className = "turn-body";
+  if (t.user) {
+    const u = document.createElement("div");
+    u.className = "turn-user";
+    u.textContent = t.user;
+    body.appendChild(u);
+  }
+  (t.steps || []).forEach(st => {
+    if (st.tool === "_think") {
+      const th = document.createElement("div");
+      th.className = "think";
+      th.textContent = "│ " + st.args;
+      body.appendChild(th);
+      return;
+    }
+    const sd = document.createElement("details");
+    sd.className = "tool-details";
+    const mark = st.success ? '<span class="ok">✓</span>' : '<span class="fail">✗</span>';
+    sd.innerHTML = "<summary>" + mark + " <span class='tool-name'>" + escHtml(st.tool) + "</span></summary>";
+    const sb = document.createElement("div");
+    sb.className = "body";
+    const argsTxt = parseArgs(st.args);
+    if (argsTxt) {
+      const al = document.createElement("div");
+      al.className = "arg-label";
+      al.textContent = "参数";
+      sb.appendChild(al);
+      sb.appendChild(document.createTextNode(argsTxt));
+    }
+    if (st.result != null) {
+      const rl = document.createElement("div");
+      rl.className = st.success ? "res-label" : "err-label";
+      rl.textContent = st.success ? "结果" : "错误";
+      sb.appendChild(rl);
+      const rtxt = String(st.result);
+      sb.appendChild(document.createTextNode(rtxt.length > 2000 ? rtxt.slice(0, 2000) + "\n…[截断]" : rtxt));
+    }
+    sd.appendChild(sb);
+    body.appendChild(sd);
+  });
+  if (t.answer) {
+    const a = document.createElement("div");
+    a.className = "turn-answer";
+    a.appendChild(renderMarkdown(t.answer));
+    body.appendChild(a);
+  }
+  det.appendChild(body);
+  return det;
 }
 
 function closeHistory(tab) {
@@ -1031,6 +1092,8 @@ function closeHistory(tab) {
   tab.sessionFile = null;
   tab.sessionData = null;
   tab.sessionStats = null;
+  tab.histTurns = null;
+  tab.histRendered = 0;
   document.getElementById("historyBar").style.display = "none";
   document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
   tab.feedEl.innerHTML = "";
@@ -1765,6 +1828,7 @@ async function execLine(line) {
     tab.turnEl = null; tab.streamEl = null; tab.pendingEl = null;
     tab.viewingHistory = false; tab.sessionFile = null; tab.sessionData = null;
     tab.sessionStats = null;
+    tab.histTurns = null; tab.histRendered = 0;
     document.getElementById("historyBar").style.display = "none";
     document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
     renderWelcome(tab);
