@@ -462,7 +462,7 @@ function createTab(title) {
     runId: null, es: null, running: false,
     turnEl: null, streamEl: null, pendingEl: null,
     stats: { tokens: 0, steps: 0, tools: {}, writes: [], reads: [] },
-    viewingHistory: false, sessionFile: null, sessionData: null,
+    viewingHistory: false, sessionFile: null, sessionData: null, sessionStats: null,
   };
   // feed 容器
   const feedEl = document.createElement("div");
@@ -921,6 +921,7 @@ async function openSession(file) {
   tab.viewingHistory = true;
   tab.sessionFile = file;
   tab.sessionData = data;
+  tab.sessionStats = data.stats || null;  // 该会话的历史统计（活动面板用）
   document.getElementById("historyBar").style.display = "flex";
   document.getElementById("histTitle").textContent = "📜 " + (data.task || "历史会话");
   document.querySelectorAll(".session-item").forEach(el => el.classList.toggle("active", el.dataset.file === file));
@@ -995,6 +996,7 @@ function closeHistory(tab) {
   tab.viewingHistory = false;
   tab.sessionFile = null;
   tab.sessionData = null;
+  tab.sessionStats = null;
   document.getElementById("historyBar").style.display = "none";
   document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
   tab.feedEl.innerHTML = "";
@@ -1728,6 +1730,7 @@ async function execLine(line) {
     tab.feedEl.innerHTML = "";
     tab.turnEl = null; tab.streamEl = null; tab.pendingEl = null;
     tab.viewingHistory = false; tab.sessionFile = null; tab.sessionData = null;
+    tab.sessionStats = null;
     document.getElementById("historyBar").style.display = "none";
     document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
     renderWelcome(tab);
@@ -1749,6 +1752,11 @@ function refreshActivity() {
 function renderActivity() {
   const body = document.getElementById("activityBody");
   const tab = activeTab();
+  // 历史会话模式：显示该会话的历史统计（token 估算/轮次/工具分布）
+  if (tab && tab.viewingHistory && tab.sessionStats) {
+    renderHistoryActivity(body, tab.sessionStats);
+    return;
+  }
   const st = tab ? tab.stats : { tokens: 0, steps: 0, tools: {}, writes: [], reads: [] };
   const toolEntries = Object.entries(st.tools).sort((a, b) => b[1] - a[1]);
   // 无数据时显示引导文案，而非全 0 表格
@@ -1810,6 +1818,40 @@ function toggleActivity() {
   p.classList.toggle("show", show);
   b.classList.toggle("active", show);
   if (show) renderActivity();
+}
+
+/* 历史会话统计面板（打开某个对话时显示该会话的活动） */
+function renderHistoryActivity(body, s) {
+  const toolEntries = Object.entries(s.tools || {}).sort((a, b) => b[1] - a[1]);
+  const maxCnt = toolEntries.length ? toolEntries[0][1] : 1;
+  let html = '<div class="act-section"><div class="as-title">📜 该会话的活动统计</div>' +
+    '<div class="act-stats">' +
+    "<div class='act-stat'><div class='val'>" + (s.tokens_est || 0).toLocaleString() +
+    "</div><div class='lbl'>token 估算</div></div>" +
+    "<div class='act-stat'><div class='val'>" + (s.turns || 0) + "</div><div class='lbl'>轮次</div></div>" +
+    "<div class='act-stat'><div class='val'>" + toolEntries.reduce((x, e) => x + e[1], 0) +
+    "</div><div class='lbl'>工具调用</div></div>" +
+    "<div class='act-stat'><div class='val'>" + (s.messages || 0) + "</div><div class='lbl'>消息数</div></div>" +
+    "</div></div>";
+  if (toolEntries.length) {
+    html += "<div class='act-section'><div class='as-title'>工具使用分布</div>";
+    toolEntries.slice(0, 8).forEach(([name, cnt]) => {
+      html += "<div class='tool-bar-row'><span class='tname'>" + escHtml(name) + "</span>" +
+        "<div class='tbar'><i style='width:" + Math.round(cnt / maxCnt * 100) + "%'></i></div>" +
+        "<span class='tcnt'>" + cnt + "</span></div>";
+    });
+    html += "</div>";
+  }
+  if ((s.writes || []).length || (s.reads || []).length) {
+    html += "<div class='act-section'><div class='as-title'>文件活动</div>";
+    (s.writes || []).forEach(f => { html += "<div class='act-file'><span class='w'>✎</span>" + escHtml(f) + "</div>"; });
+    (s.reads || []).slice(-8).forEach(f => { html += "<div class='act-file'><span class='r'>👁</span>" + escHtml(f) + "</div>"; });
+    html += "</div>";
+  }
+  if (!toolEntries.length && !(s.writes || []).length) {
+    html += '<div class="act-empty">该会话为纯对话，无工具调用</div>';
+  }
+  body.innerHTML = html;
 }
 
 /* ═══════════ 初始化 ═══════════ */

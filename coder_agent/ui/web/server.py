@@ -402,7 +402,50 @@ def api_session(file: str = ""):
 
     task = turns[0]["user"] if turns else "?"
     return {"file": str(p), "task": task[:200], "turns": turns,
-            "meta": data.get("meta")}
+            "meta": data.get("meta"),
+            "stats": _session_stats(messages)}
+
+
+def _session_stats(messages: list[dict]) -> dict:
+    """历史会话统计：token 估算 / 轮次 / 工具调用分布 / 文件读写。"""
+    import json as _json
+    from coder_agent.llm.tokenizer import count_messages_tokens
+
+    tools: dict[str, int] = {}
+    writes: list[str] = []
+    reads: list[str] = []
+    turns = 0
+    for m in messages:
+        if m.get("role") == "user":
+            turns += 1
+        if m.get("role") != "assistant":
+            continue
+        for tc in m.get("tool_calls") or []:
+            fn = tc.get("function", {})
+            name = fn.get("name", "?")
+            tools[name] = tools.get(name, 0) + 1
+            try:
+                args = _json.loads(fn.get("arguments") or "{}")
+            except Exception:
+                args = {}
+            path = args.get("path", "") if isinstance(args, dict) else ""
+            if not path:
+                continue
+            if name in ("write_file", "edit_file", "append_file"):
+                if path not in writes:
+                    writes.append(path)
+            elif name == "read_file":
+                if path not in reads:
+                    reads.append(path)
+    tokens_est = count_messages_tokens(messages) if messages else 0
+    return {
+        "messages": len(messages),
+        "turns": turns,
+        "tools": tools,
+        "writes": writes[-10:],
+        "reads": reads[-10:],
+        "tokens_est": tokens_est,
+    }
 
 
 @app.delete("/api/session")
