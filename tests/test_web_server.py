@@ -90,3 +90,86 @@ class TestFilesEndpoints:
     def test_file_missing_404(self, client, tmp_path: Path):
         web_server._state["manager"] = web_server.RunManager(tmp_path)
         assert client.get("/api/file", params={"path": str(tmp_path / "no.txt")}).status_code == 404
+
+
+class TestSessionDetail:
+    def test_session_detail_grouped_by_turn(self, client, tmp_path: Path):
+        """/api/session 按 turn 分组回放，含工具调用参数与结果。"""
+        import json
+        from pathlib import Path as P
+
+        session_dir = P.home() / ".coder_sessions"
+        session_dir.mkdir(parents=True, exist_ok=True)
+        f = session_dir / "session_test_turns.jsonl"
+        lines = [
+            {"type": "meta", "created": 1.0, "version": 1},
+            {"type": "message", "message": {"role": "user", "content": "写一个 hello.py"}},
+            {"type": "message", "message": {"role": "assistant", "content": "我先看看目录",
+                                            "tool_calls": [{"id": "c1", "type": "function",
+                                                            "function": {"name": "read_file",
+                                                                         "arguments": '{"path": "hello.py"}'}}]}},
+            {"type": "message", "message": {"role": "tool", "tool_call_id": "c1",
+                                            "content": "(error) 文件不存在"}},
+            {"type": "message", "message": {"role": "assistant", "content": "文件不存在，我来创建它",
+                                            "tool_calls": [{"id": "c2", "type": "function",
+                                                            "function": {"name": "write_file",
+                                                                         "arguments": '{"path": "hello.py", "content": "print(1)"}'}}]}},
+            {"type": "message", "message": {"role": "tool", "tool_call_id": "c2", "content": "已写入"}},
+            {"type": "message", "message": {"role": "assistant", "content": "✅ 完成：hello.py 已创建"}},
+        ]
+        f.write_text("\n".join(json.dumps(l, ensure_ascii=False) for l in lines) + "\n",
+                     encoding="utf-8")
+        try:
+            r = client.get("/api/session", params={"file": str(f)})
+            assert r.status_code == 200
+            data = r.json()
+            assert len(data["turns"]) == 1
+            turn = data["turns"][0]
+            assert turn["user"] == "写一个 hello.py"
+            tools = [s["tool"] for s in turn["steps"] if s["tool"] != "_think"]
+            assert tools == ["read_file", "write_file"]
+            read_step = next(s for s in turn["steps"] if s["tool"] == "read_file")
+            write_step = next(s for s in turn["steps"] if s["tool"] == "write_file")
+            # read_file 失败标记、write_file 成功标记
+            assert read_step["success"] is False
+            assert read_step["result"].startswith("(error)")
+            assert write_step["success"] is True
+            assert write_step["result"] == "已写入"
+            assert turn["answer"] == "✅ 完成：hello.py 已创建"
+        finally:
+            f.unlink(missing_ok=True)
+
+    def test_session_detail_rejects_escape(self, client):
+        r = client.get("/api/session", params={"file": "C:/Windows/system32/drivers/etc/hosts"})
+        assert r.status_code == 403
+
+    def test_session_detail_missing_file_404(self, client):
+        r = client.get("/api/session", params={"file": str(Path.home() / ".coder_sessions" / "nope.jsonl")})
+        assert r.status_code == 404
+
+
+class TestConfigEndpoint:
+    def test_get_config_defaults(self, client, tmp_path: Path):
+        web_server._state["manager"] = web_server.RunManager(tmp_path)
+        r = client.get("/api/config")
+        data = r.json()
+        assert "model" in data and "base_url" in data
+        assert "api_key_set" in data
+
+    def test_set_config_persists(self, client, tmp_path: Path):
+        web_server._state["manager"] = web_server.RunManager(tmp_path)
+        r = client.post("/api/config", json={"model": "test-model", "base_url": "http://localhost:9/v1"})
+        assert r.status_code == 200
+        m = web_server.get_manager()
+        assert m.model == "test-model"
+        assert m.base_url == "http://localhost:9/v1"
+        # 从配置文件可恢复
+        from coder_agent.ui.web.runner import load_config
+        cfg = load_config()
+        assert cfg.get("model") == "test-model"
+        # 清理配置，避免污染其他测试
+        import os
+        cfg.pop("model", None)
+        cfg.pop("base_url", None)
+        from coder_agent.ui.web.runner import save_config
+        save_config(cfg)

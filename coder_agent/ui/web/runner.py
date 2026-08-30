@@ -8,13 +8,30 @@
 
 from __future__ import annotations
 
+import json
 import queue
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable, Generator
 
 from coder_agent.llm.client import LLMClient
 from coder_agent.tools.registry import create_default_registry
+
+CONFIG_FILE = Path.home() / ".coder_config.json"
+
+
+def load_config() -> dict:
+    """读取用户 API 配置（~/.coder_config.json），不存在时返回空 dict。"""
+    try:
+        return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_config(cfg: dict) -> None:
+    CONFIG_FILE.write_text(
+        json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 class RunManager:
@@ -35,6 +52,34 @@ class RunManager:
         self._error: str | None = None
         self.model = "agnes-2.5-flash"
         self.mode = "full"
+        # API 配置：优先读取 ~/.coder_config.json，其次环境变量
+        cfg = load_config()
+        self.model = cfg.get("model") or self.model
+        self.base_url: str | None = cfg.get("base_url") or None
+        self.api_key: str | None = cfg.get("api_key") or None
+
+    def set_config(self, model: str | None = None,
+                   base_url: str | None = None,
+                   api_key: str | None = None) -> dict:
+        """更新模型/API 配置并持久化（立即影响后续运行）。"""
+        cfg = load_config()
+        if model:
+            self.model = model
+            cfg["model"] = model
+        if base_url is not None:
+            self.base_url = base_url or None
+            if base_url:
+                cfg["base_url"] = base_url
+            else:
+                cfg.pop("base_url", None)
+        if api_key is not None:
+            self.api_key = api_key or None
+            if api_key:
+                cfg["api_key"] = api_key
+            else:
+                cfg.pop("api_key", None)
+        save_config(cfg)
+        return {"ok": True, "model": self.model}
 
     def tool_specs(self) -> list[dict]:
         """当前工作区下模型可用的工具清单（/tools 命令数据源）。"""
@@ -53,7 +98,8 @@ class RunManager:
         from coder_agent.ui.cli.repl import CoderRepl  # 复用注册逻辑
         registry = create_default_registry(self.workspace, AgentMode(self.mode))
         return Agent(
-            llm_client=LLMClient(model=self.model),
+            llm_client=LLMClient(model=self.model, api_key=self.api_key,
+                                 base_url=self.base_url),
             registry=registry, workspace=self.workspace,
             mode=AgentMode(self.mode),
             verifier=Verifier(self.workspace, task=""),
@@ -158,6 +204,3 @@ class RunManager:
                 return
             else:
                 time.sleep(0.15)
-
-
-import time  # noqa: E402  (stream_events 用)

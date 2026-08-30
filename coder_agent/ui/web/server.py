@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
-from .runner import RunManager
+from .runner import RunManager, load_config
 
 app = FastAPI(title="Coder-Agent Web")
 
@@ -45,6 +45,12 @@ class RunRequest(BaseModel):
 
 class ModelRequest(BaseModel):
     model: str
+
+
+class ConfigRequest(BaseModel):
+    model: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -86,13 +92,20 @@ def api_sessions():
              if session_dir.exists() else [])
     out = []
     from coder_agent.journal import load_journal
-    for f in files[:10]:
+    for f in files[:20]:  # 限制返回 20 个，避免过多
         try:
-            first_user = next((m.get("content", "")[:50] for m in
-                               load_journal(f)["messages"] if m.get("role") == "user"), "?")
+            journal = load_journal(f)
+            # 提取更多内容作为预览（前 100 字符）
+            user_messages = [m.get("content", "") for m in journal["messages"]
+                             if m.get("role") == "user"]
+            first_user = (user_messages[0][:100] if user_messages else "?")
+            # 如果有多个用户消息，显示总数
+            task_preview = first_user
+            if len(user_messages) > 1:
+                task_preview += f" ... (+{len(user_messages)-1} more)"
         except Exception:
-            first_user = "?"
-        out.append({"file": str(f), "name": f.name, "task": first_user})
+            task_preview = "?"
+        out.append({"file": str(f), "name": f.name, "task": task_preview})
     return {"sessions": out}
 
 
@@ -110,7 +123,7 @@ def api_resume(req: RunRequest):
         if not files:
             raise HTTPException(status_code=404, detail="没有可恢复的会话——先运行一次任务")
         resume_path = str(files[0])
-    return manager.start(req.task, mode=req.mode, model=req.model,
+    return get_manager().start(req.task, mode=req.mode, model=req.model,
                          resume_path=resume_path)
 
 
@@ -161,7 +174,7 @@ def api_tools():
 def api_models():
     import urllib.request
 
-    base = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+    base = (os.getenv("OPENAI_BASE_URL") or "https://api.agnes-ai.cn/v1").rstrip("/")
     key = os.getenv("OPENAI_API_KEY") or ""
     try:
         req = urllib.request.Request(
@@ -214,6 +227,113 @@ def api_status():
     m = get_manager()
     return {"running": m.running, "model": m.model, "mode": m.mode,
             "workspace": str(m.workspace)}
+
+
+# ── API 配置（模型 / Base URL / Key）──────────────────────────────────
+# 持久化到 ~/.coder_config.json，立即影响后续运行。
+
+
+@app.get("/api/config")
+def api_get_config():
+    m = get_manager()
+    cfg = load_config()
+    env_url = os.getenv("OPENAI_BASE_URL")
+    return {
+        "model": m.model,
+        "base_url": m.base_url or env_url or "https://api.agnes-ai.cn/v1",
+        "api_key_set": bool(m.api_key or os.getenv("OPENAI_API_KEY")),
+        "workspace": str(m.workspace),
+    }
+
+
+@app.post("/api/config")
+def api_set_config(req: ConfigRequest):
+    m = get_manager()
+    m.set_config(model=req.model, base_url=req.base_url, api_key=req.api_key)
+    return {"ok": True, "model": m.model}
+
+
+# ── 会话详情（历史回放，按 turn 分组）─────────────────────────────────
+
+
+@app.get("/api/session")
+def api_session(file: str = ""):
+    """加载一个历史会话，按 turn 分组返回（前端可展开查看每个 turn）。"""
+    session_dir = Path.home() / ".coder_sessions"
+    if not file:
+        raise HTTPException(status_code=400, detail="file 参数不能为空")
+    p = Path(file)
+    try:
+        p.resolve().relative_to(session_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="路径越界")
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    from coder_agent.journal import load_journal
+    data = load_journal(p)
+    messages = data.get("messages") or []
+
+    turns: list[dict] = []
+    cur: dict | None = None
+    for msg in messages:
+        role = msg.get("role")
+        if role == "user":
+            if cur and (cur.get("steps") or cur.get("answer")):
+                turns.append(cur)
+            cur = {"user": msg.get("content", ""), "steps": [], "answer": None}
+        elif role == "assistant":
+            tcs = msg.get("tool_calls") or []
+            content = msg.get("content") or ""
+            if cur is None:
+                cur = {"user": "", "steps": [], "answer": None}
+            if tcs:
+                for tc in tcs:
+                    fn = tc.get("function", {})
+                    cur["steps"].append({
+                        "tool": fn.get("name", "?"),
+                        "args": (fn.get("arguments") or "{}"),
+                        "result": None, "success": True, "pending": True,
+                    })
+                if content:
+                    cur["steps"].append({
+                        "tool": "_think", "args": content,
+                        "result": None, "success": True, "pending": False,
+                    })
+            elif content:
+                cur["answer"] = content
+        elif role == "tool":
+            if cur and cur["steps"]:
+                for st in reversed(cur["steps"]):
+                    if st.get("pending"):
+                        st["result"] = msg.get("content", "")
+                        st["success"] = not str(msg.get("content", "")).startswith("(error)")
+                        st["pending"] = False
+                        break
+    if cur and (cur.get("steps") or cur.get("answer")):
+        turns.append(cur)
+
+    task = turns[0]["user"] if turns else "?"
+    return {"file": str(p), "task": task[:200], "turns": turns,
+            "meta": data.get("meta")}
+
+
+@app.get("/api/commands")
+def api_commands():
+    """返回可用命令列表（供前端动态加载）。"""
+    return {
+        "commands": [
+            {"name": "/help", "desc": "显示命令帮助", "hasArgs": False},
+            {"name": "/status", "desc": "显示运行状态与当前工作区", "hasArgs": False},
+            {"name": "/tools", "desc": "列出模型可用的工具", "hasArgs": False},
+            {"name": "/model", "desc": "切换模型（无参数显示列表，可输入名称）", "hasArgs": True},
+            {"name": "/mode", "desc": "切换执行模式 full/goal/plan/dry-run", "hasArgs": True},
+            {"name": "/goal", "desc": "设置会话目标（注入后续每次运行）", "hasArgs": True},
+            {"name": "/sessions", "desc": "列出会话（含任务预览）", "hasArgs": False},
+            {"name": "/resume", "desc": "恢复会话（无参=最新；或输入序号）", "hasArgs": True},
+            {"name": "/clear", "desc": "清空对话显示", "hasArgs": False},
+        ]
+    }
 
 
 if __name__ == "__main__":
