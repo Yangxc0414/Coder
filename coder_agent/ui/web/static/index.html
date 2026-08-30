@@ -187,6 +187,14 @@
   #palette .item .kbd { color: var(--faint); font-size: 10px; border: 1px solid var(--border2); border-radius: 3px; padding: 1px 5px; }
   #palette .empty { padding: 12px 14px; color: var(--faint); font-size: 12px; }
   #paramHint { display: none; font-size: 11px; color: var(--accent); padding: 2px 4px; }
+  /* 输入队列 */
+  #queueBar { display: none; flex-wrap: wrap; gap: 6px; align-items: center; padding: 4px 0; }
+  .q-label { font-size: 11px; color: var(--muted); font-weight: 600; }
+  .q-item { display: flex; align-items: center; gap: 4px; background: var(--bg3); border: 1px solid var(--border); border-radius: 14px; padding: 2px 4px 2px 10px; font-size: 11px; color: var(--muted); }
+  .q-item .q-text { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .q-btn { background: none; border: none; color: var(--faint); cursor: pointer; font-size: 11px; padding: 1px 3px; border-radius: 3px; }
+  .q-btn:hover { color: var(--accent); background: var(--bg4); }
+  .q-btn.del:hover { color: var(--err); }
 
   form { display: flex; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--bg2); flex-direction: column; }
   .input-row { display: flex; gap: 10px; align-items: flex-end; }
@@ -352,12 +360,13 @@
 
   <form id="form" onsubmit="return false;">
     <div id="paramHint"></div>
+    <div id="queueBar"></div>
     <div class="input-row">
       <textarea id="task" rows="1" placeholder="输入编程任务… Enter 发送 / Shift+Enter 换行 / 输入 / 呼出命令面板" autocomplete="off"></textarea>
       <button type="button" class="primary" id="send" onclick="handleSubmit()">运行</button>
       <button type="button" class="stop" id="stop" onclick="abort()">■ 停止</button>
     </div>
-    <div class="input-hint" id="inputHint">⏎ 发送 · Shift+⏎ 换行 · / 命令面板 · Ctrl+T 新建会话 · Ctrl+W 关闭 · Ctrl+Tab 切换 · Ctrl+K 清空 · Ctrl+L 主题</div>
+    <div class="input-hint" id="inputHint">⏎ 发送 · Shift+⏎ 换行 · / 命令面板 · 运行中发送自动入队列（可改序/删除） · Ctrl+K 清空 · Ctrl+L 主题</div>
   </form>
 </main>
 
@@ -481,6 +490,7 @@ function createTab(title) {
     id, title: title || "新会话",
     runId: null, es: null, running: false,
     goal: AppState.sessionGoal || "",  // 会话级目标（新会话继承全局默认）
+    queue: [],  // 输入队列（运行中提交的任务排队，完成后自动执行）
     turnEl: null, turnStep: null, streamEl: null, pendingEl: null,
     stateInfo: null, endedShown: false,
     stats: { tokens: 0, steps: 0, tools: {}, writes: [], reads: [] },
@@ -527,6 +537,7 @@ function switchTab(id) {
     tab.stateInfo ? tab.stateInfo.step + "/" + (tab.stateInfo.max_steps || 50) : tab.stats.steps;
   document.getElementById("historyBar").style.display = tab.viewingHistory ? "flex" : "none";
   updateGoalBadge();  // 切换会话时同步 footer 目标徽章
+  updateQueueBar(tab);  // 切换会话时同步输入队列栏
   if (tab.viewingHistory && tab.sessionData) {
     document.getElementById("histTitle").textContent = "📜 " + (tab.sessionData.task || "历史会话");
   }
@@ -563,6 +574,33 @@ function setRunning(tab, v) {
     document.getElementById("stop").style.display = v ? "inline-block" : "none";
     document.getElementById("send").disabled = v;
   }
+}
+
+/* ═══════════ 输入队列（运行中排队，完成后自动执行，可改序） ═══════════ */
+function updateQueueBar(tab) {
+  const bar = document.getElementById("queueBar");
+  if (!tab || !tab.queue || !tab.queue.length) { bar.style.display = "none"; return; }
+  bar.style.display = "flex";
+  bar.innerHTML = '<span class="q-label">⏳ 队列 (' + tab.queue.length + ')：</span>';
+  tab.queue.forEach((q, i) => {
+    const item = document.createElement("div");
+    item.className = "q-item";
+    item.title = q;
+    item.innerHTML = '<span class="q-text">' + escHtml(q.length > 22 ? q.slice(0, 22) + "…" : q) + '</span>' +
+      '<button class="q-btn" title="删除">×</button>' +
+      '<button class="q-btn" title="上移">↑</button>' +
+      '<button class="q-btn" title="下移">↓</button>';
+    const btns = item.querySelectorAll("button");
+    btns[0].className = "q-btn del";
+    btns[0].onclick = () => { tab.queue.splice(i, 1); updateQueueBar(tab); };
+    btns[1].onclick = () => {
+      if (i > 0) { [tab.queue[i - 1], tab.queue[i]] = [tab.queue[i], tab.queue[i - 1]]; updateQueueBar(tab); }
+    };
+    btns[2].onclick = () => {
+      if (i < tab.queue.length - 1) { [tab.queue[i + 1], tab.queue[i]] = [tab.queue[i], tab.queue[i + 1]]; updateQueueBar(tab); }
+    };
+    bar.appendChild(item);
+  });
 }
 
 function addTabMsg(tab, cls, text) {
@@ -1017,6 +1055,13 @@ function onEvent(ev, tab) {
       tab.feedEl.appendChild(div);
       scrollFeedEl(tab.feedEl, true);
     }
+    // 队列：自动执行下一项
+    if (tab.queue.length) {
+      const next = tab.queue.shift();
+      updateQueueBar(tab);
+      addTabMsg(tab, "turn", "⏳ 开始执行队列下一项…");
+      setTimeout(() => submitTask(next), 300);
+    }
     loadSessions();
     if (document.getElementById("activityPanel").classList.contains("show")) {
       renderActivity();  // 运行结束最终刷新统计
@@ -1043,7 +1088,15 @@ function continueFromHistory(tab) {
 
 async function submitTask(task) {
   const tab = activeTab();
-  if (!tab || tab.running || !task) return;
+  if (!tab || !task) return;
+  // 运行中提交 → 进入队列（当前运行结束后自动执行），并可改序/删除
+  if (tab.running) {
+    tab.queue.push(task);
+    updateQueueBar(tab);
+    addTabMsg(tab, "turn", "⏳ 当前任务运行中——已加入队列（第 " + tab.queue.length +
+      " 项，完成后自动执行；可在输入框上方改序/删除）");
+    return;
+  }
   // 查看历史会话时发消息 = 续接该会话（resume 管线，历史上下文带入）
   const isHistoryContinue = tab.viewingHistory && tab.sessionFile;
   if (isHistoryContinue) {
@@ -2111,11 +2164,12 @@ async function execLine(line) {
     } else if (arg) {
       tab.goal = arg;
       updateGoalBadge();
-      addTabMsg(tab, "answer", "会话目标已设置（仅当前会话）: " + arg +
-        "\n将随本次会话的每次运行注入系统提示（Goal 字段）");
+      addTabMsg(tab, "answer", "🎯 会话目标已设置（仅当前会话）: " + arg +
+        "\ngoal 模式下 agent 将持续工作直到目标达成——每一步都以目标为指引，" +
+        "完成时由 Verifier 检查（测试/语法）确认，未达成自动修复重试");
     } else addTabMsg(tab, "answer", tab.goal
       ? "当前会话目标: " + tab.goal
-      : "未设置（用法: /goal <text>，仅作用于当前会话）");
+      : "未设置（用法: /goal <目标描述>，仅作用于当前会话）");
   } else if (cmd === "/sessions") {
     const d = await (await fetch("/api/sessions")).json();
     const card = addTabMsg(tab, "answer", "");
@@ -2185,6 +2239,8 @@ async function execLine(line) {
     tab.viewingHistory = false; tab.sessionFile = null; tab.sessionData = null;
     tab.sessionStats = null;
     tab.histTurns = null; tab.histRendered = 0;
+    tab.queue = [];
+    updateQueueBar(tab);
     document.getElementById("historyBar").style.display = "none";
     document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
     renderWelcome(tab);
