@@ -290,8 +290,9 @@
     </div>
     <div class="header-group input-wrapper">
       <span class="header-label">模型</span>
-      <input type="text" id="model" style="width:150px;" placeholder="输入模型名..." list="modelList" title="可直接输入模型名，回车/失焦保存">
+      <input type="text" id="model" style="width:150px;" placeholder="选择模型..." list="modelList" readonly title="点击选择模型，或选 ✏️ 输入自定义模型名">
       <datalist id="modelList"></datalist>
+      <button class="header-btn" style="padding:5px 8px;" onclick="document.getElementById('model').focus()" title="选择模型">▾</button>
       <div id="modelDropdown"></div>
     </div>
     <button class="header-btn" id="activityBtn" onclick="toggleActivity()">📊 活动</button>
@@ -1124,6 +1125,19 @@ function renderModelDropdown() {
     };
     dropdown.appendChild(div);
   });
+  // 自定义模型入口：进入编辑模式
+  const custom = document.createElement("div");
+  custom.className = "model-item";
+  custom.style.cssText = "border-top:1px solid var(--border);color:var(--accent);";
+  custom.textContent = "✏️ 输入自定义模型名…";
+  custom.onclick = () => {
+    dropdown.style.display = "none";
+    const input = document.getElementById("model");
+    input.readOnly = false;
+    input.focus();
+    input.select();
+  };
+  dropdown.appendChild(custom);
 }
 async function saveModelOnly(m) {
   if (!m) return;
@@ -1133,19 +1147,22 @@ async function saveModelOnly(m) {
     body: JSON.stringify({ model: m })
   }).catch(() => {});
 }
-// header 模型输入：可直接输入，失焦/回车保存
-document.getElementById("model").addEventListener("change", () => {
-  const v = document.getElementById("model").value.trim();
+const modelInput = document.getElementById("model");
+// header 模型：失焦/回车保存，并恢复只读（下拉选择模式）
+modelInput.addEventListener("change", () => {
+  const v = modelInput.value.trim();
   if (v) saveModelOnly(v);
+  modelInput.readOnly = true;
 });
-document.getElementById("model").addEventListener("keydown", (e) => {
+modelInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
-    const v = document.getElementById("model").value.trim();
-    if (v) { saveModelOnly(v); document.getElementById("model").blur(); }
+    const v = modelInput.value.trim();
+    if (v) { saveModelOnly(v); modelInput.blur(); }
   }
+  if (e.key === "Escape") { modelInput.readOnly = true; modelInput.blur(); }
 });
-document.getElementById("model").addEventListener("focus", () => {
+modelInput.addEventListener("focus", () => {
   if (AppState.models.length) {
     renderModelDropdown();
     document.getElementById("modelDropdown").style.display = "block";
