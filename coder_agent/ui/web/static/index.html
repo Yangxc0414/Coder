@@ -612,10 +612,11 @@ function renderWelcome(tab) {
     ).join("") + '</div>' +
     '<div class="suggest-label">扩展能力（Extensions）：</div>' +
     '<div class="suggest-chips">' +
-    '<span class="chip" style="cursor:default;">🎓 5 Skills</span>' +
-    '<span class="chip" style="cursor:default;">🔌 5 MCP 工具</span>' +
+    '<span class="chip" style="cursor:default;" title="code_review / test_writer / refactor / docstring / security_audit">🎓 5 Skills</span>' +
+    '<span class="chip" style="cursor:default;" title="git_log / git_status / git_diff / system_info / read_trace">🔌 5 MCP 工具</span>' +
     '<span class="chip" style="cursor:default;">🧩 子代理委托</span>' +
     '<span class="chip" style="cursor:default;">🧠 记忆工具</span>' +
+    '<span class="chip" style="cursor:default;color:var(--faint);" title="输入 /skills /mcp 查看详情">/skills · /mcp</span>' +
     '</div>' +
     '<div class="shortcut-hint">' +
     "<b>Enter</b> 发送 &nbsp; <b>/</b> 命令面板 &nbsp; <b>Ctrl+T</b> 新会话 &nbsp; <b>Ctrl+Tab</b> 切换 &nbsp; <b>Ctrl+W</b> 关闭 &nbsp; <b>Ctrl+L</b> 主题" +
@@ -1672,6 +1673,8 @@ async function loadCommands() {
       { name: "/help", desc: "显示命令帮助", hasArgs: false },
       { name: "/status", desc: "显示运行状态", hasArgs: false },
       { name: "/tools", desc: "列出工具", hasArgs: false },
+      { name: "/skills", desc: "Skills 详情", hasArgs: false },
+      { name: "/mcp", desc: "MCP 工具详情", hasArgs: false },
       { name: "/model", desc: "切换模型", hasArgs: true },
       { name: "/mode", desc: "切换模式", hasArgs: true },
       { name: "/goal", desc: "设置目标", hasArgs: true },
@@ -1904,6 +1907,44 @@ async function execLine(line) {
       html += "<br>";
     });
     card.innerHTML = html;
+    card.style.whiteSpace = "pre-wrap";
+  } else if (cmd === "/skills") {
+    const d = await (await fetch("/api/extensions")).json();
+    const skills = d.skills || [];
+    const card = addTabMsg(tab, "answer", "");
+    let html = "<b>🎓 内置 Skills (" + skills.length + ")</b><br><br>";
+    skills.forEach(s => {
+      html += "<b style='color:var(--ok);font-family:Consolas,monospace;'>" + escHtml(s.name) + "</b>" +
+        " — " + escHtml(s.description) + "<br>" +
+        (s.when_to_use ? "      🕐 适用: " + escHtml(s.when_to_use) + "<br>" : "") +
+        (s.allowed_tools && s.allowed_tools.length
+          ? "      🔧 允许工具: " + escHtml(s.allowed_tools.join(", ")) + "<br>"
+          : "") +
+        "      📝 参数: target（目标文件/函数/模式）" +
+        (s.parameters && s.parameters.required ? "，必填: " + escHtml(s.parameters.required.join(", ")) : "") +
+        "<br><br>";
+    });
+    card.innerHTML = html || "没有可用 Skills";
+    card.style.whiteSpace = "pre-wrap";
+  } else if (cmd === "/mcp") {
+    const d = await (await fetch("/api/extensions")).json();
+    const mcp = d.mcp || {};
+    const servers = Object.keys(mcp);
+    const total = servers.reduce((n, k) => n + mcp[k].length, 0);
+    const card = addTabMsg(tab, "answer", "");
+    let html = "<b>🔌 MCP 工具 (" + total + "，服务器 " + servers.length + " 个)</b><br><br>";
+    servers.forEach(srv => {
+      html += "<b style='color:var(--accent);'>🖥 " + escHtml(srv) + "</b> 服务器<br>";
+      mcp[srv].forEach(t => {
+        html += "  <span style='color:var(--accent);font-family:Consolas,monospace;'>" + escHtml(t.name) + "</span> — " +
+          escHtml(t.description) + "<br>" +
+          "      📝 参数: " + escHtml(Object.keys(t.parameters.properties || {}).join(", ") || "无") +
+          (t.parameters.required ? "（必填: " + escHtml(t.parameters.required.join(", ")) + "）" : "") +
+          "<br>";
+      });
+      html += "<br>";
+    });
+    card.innerHTML = html || "没有可用的 MCP 工具";
     card.style.whiteSpace = "pre-wrap";
   } else if (cmd === "/model") {
     if (!arg) {

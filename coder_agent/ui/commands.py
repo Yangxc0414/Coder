@@ -10,7 +10,9 @@ from __future__ import annotations
 COMMANDS: list[dict] = [
     {"name": "/help", "desc": "显示命令帮助", "hasArgs": False},
     {"name": "/status", "desc": "显示运行状态与当前工作区", "hasArgs": False},
-    {"name": "/tools", "desc": "列出模型可用的工具", "hasArgs": False},
+    {"name": "/tools", "desc": "列出模型可用的工具（按核心/Skill/MCP 分类）", "hasArgs": False},
+    {"name": "/skills", "desc": "显示内置 Skills 详情（描述/何时使用/参数）", "hasArgs": False},
+    {"name": "/mcp", "desc": "显示 MCP 工具详情（按服务器分组）", "hasArgs": False},
     {"name": "/model", "desc": "切换模型（无参数显示列表，可输入名称）", "hasArgs": True,
      "argHint": "<模型名>，如 agnes-2.5-pro"},
     {"name": "/mode", "desc": "切换执行模式 full/goal/plan/dry-run", "hasArgs": True,

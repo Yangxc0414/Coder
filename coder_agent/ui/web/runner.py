@@ -501,5 +501,41 @@ class RunManager:
             counts[category] += 1
             specs.append({"name": name,
                           "description": (fn.get("description") or "")[:100],
-                          "category": category})
+                          "category": category,
+                          "parameters": fn.get("parameters", {})})
         return {"tools": specs, "counts": counts}
+
+    def extensions_info(self) -> dict:
+        """扩展系统详情：Skills 与 MCP 工具的定义（/skills /mcp 数据源）。
+
+        直接从 extensions 模块读取真实定义（描述/何时使用/参数/服务器），
+        与模型看到的工具 schema 同源。
+        """
+        from coder_agent.extensions.skills.builtin import get_builtin_skills
+        from coder_agent.extensions.mcp.builtins import create_builtin_mcp_tools
+
+        skills = []
+        for s in get_builtin_skills():
+            desc = s.description
+            when = ""
+            if "\n\nUse this when: " in desc:
+                desc, when = desc.split("\n\nUse this when: ", 1)
+            skills.append({
+                "name": s.name,
+                "display": s.name.replace("skill_", ""),
+                "description": desc.strip()[:150],
+                "when_to_use": when.strip()[:100],
+                "parameters": s.parameters,
+                "allowed_tools": list(getattr(s, "allowed_tools", ()) or ()),
+            })
+        mcp: dict[str, list[dict]] = {}
+        for t in create_builtin_mcp_tools(self.workspace):
+            server = getattr(t, "_server_name", "?")
+            mcp.setdefault(server, []).append({
+                "name": t.name,
+                "display": t.name.replace(f"mcp_{server}_", ""),
+                "description": (t.description or "").replace(
+                    f"[MCP: {server}] ", "")[:150],
+                "parameters": t.parameters,
+            })
+        return {"skills": skills, "mcp": mcp}

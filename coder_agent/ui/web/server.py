@@ -190,6 +190,12 @@ def api_tools():
     return get_manager().tool_specs()  # {"tools": [...], "counts": {...}}
 
 
+@app.get("/api/extensions")
+def api_extensions():
+    """扩展系统详情：Skills 与 MCP 工具定义（/skills /mcp 命令数据源）。"""
+    return get_manager().extensions_info()
+
+
 @app.get("/api/models")
 def api_models():
     # 复用 LLMClient 的配置解析（用户配置 > 环境变量）与 HTTP 客户端
