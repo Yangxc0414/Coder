@@ -17,7 +17,7 @@ COMMANDS: list[dict] = [
      "argHint": "<模型名>，如 agnes-2.5-pro"},
     {"name": "/mode", "desc": "切换执行模式 full/plan/dry-run（目标用 /goal）", "hasArgs": True,
      "argHint": "full | plan | dry-run"},
-    {"name": "/goal", "desc": "设置会话目标（注入后续每次运行）", "hasArgs": True,
+    {"name": "/goal", "desc": "设置会话目标并立即开始执行（持续直到达成）", "hasArgs": True,
      "argHint": "<目标描述>，或 clear 清除"},
     {"name": "/sessions", "desc": "列出会话（含任务预览）", "hasArgs": False},
     {"name": "/resume", "desc": "恢复会话（无参=最新；或输入序号）", "hasArgs": True,
