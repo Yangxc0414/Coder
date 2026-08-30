@@ -1096,11 +1096,12 @@ function handleSubmit() {
 
 /* ═══════════ 历史会话（作用于当前 tab） ═══════════ */
 async function openSession(file) {
-  const tab = activeTab();
+  let tab = activeTab();
   if (!tab) return;
   if (tab.running) {
-    addTabMsg(tab, "error", "当前会话正在运行——请先停止或新建会话再查看历史");
-    return;
+    // 当前会话正在运行：自动新建 tab 打开历史，不打断运行中的任务
+    tab = createTab();
+    addTabMsg(tab, "turn", "当前会话正在运行——已在新会话中打开历史");
   }
   const resp = await fetch("/api/session?file=" + encodeURIComponent(file));
   if (!resp.ok) {
