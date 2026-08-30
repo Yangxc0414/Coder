@@ -263,15 +263,17 @@ def api_fs_pick():
     ps_script = (
         "Add-Type -AssemblyName System.Windows.Forms;"
         "Add-Type -AssemblyName System.Drawing;"
-        # 隐藏的 TopMost 窗体作为 owner → 对话框显示在所有窗口之上
+        # 置顶 owner 窗体（可见 1x1、屏幕外、无边框）→ 对话框显示在最前
         "$w = New-Object System.Windows.Forms.Form;"
         "$w.TopMost = $true;"
         "$w.ShowInTaskbar = $false;"
-        "$w.Opacity = 0;"
+        "$w.FormBorderStyle = 'None';"
+        "$w.Opacity = 0.01;"
         "$w.Size = New-Object System.Drawing.Size(1,1);"
         "$w.StartPosition = 'Manual';"
         "$w.Location = New-Object System.Drawing.Point(-32000,-32000);"
         "$w.Show();"
+        "$w.Activate();"
         "$f = New-Object System.Windows.Forms.FolderBrowserDialog;"
         "$f.Description = '选择工作区文件夹';"
         "$f.ShowNewFolderButton = $true;"
