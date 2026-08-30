@@ -1495,6 +1495,14 @@ async function saveModelOnly(m) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: m })
   }).catch(() => {});
+  // 模型变化后刷新上下文配置（预算/窗口跟随新模型）
+  try {
+    const cfg = await (await fetch("/api/config")).json();
+    AppState.contextInfo = {
+      model: cfg.model, budget: cfg.context_budget,
+      ratio: cfg.context_ratio, keep_rounds: cfg.keep_rounds,
+    };
+  } catch (e) {}
 }
 const modelInput = document.getElementById("model");
 modelInput.addEventListener("change", () => {
@@ -1881,6 +1889,8 @@ async function execLine(line) {
       addTabMsg(tab, "error", "当前会话有任务在运行，请先停止");
       return;
     }
+    // 恢复会话也创建 turn 容器（用户消息可见，与 /run 行为一致）
+    addTurnUserMsg(tab, arg || "继续之前的任务");
     setRunning(tab, true);
     const resp = await fetch("/api/resume", {
       method: "POST",
@@ -1896,7 +1906,12 @@ async function execLine(line) {
     tab.runId = data.run_id;
     listenEvents(tab);
   } else if (cmd === "/compact") {
-    const resp = await fetch("/api/compact", { method: "POST" });
+    // 作用于当前 tab 的会话（多会话并行下不错位）
+    const resp = await fetch("/api/compact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_id: tab.runId || null })
+    });
     const d = await resp.json().catch(() => ({}));
     if (resp.ok) {
       addTabMsg(tab, "answer", "✅ 上下文已压缩: " + d.before + " → " + d.after + " 条消息");
@@ -1904,7 +1919,8 @@ async function execLine(line) {
       addTabMsg(tab, "error", d.detail || "压缩失败");
     }
   } else if (cmd === "/history") {
-    const d = await (await fetch("/api/context")).json();
+    const d = await (await fetch("/api/context?run_id=" +
+      encodeURIComponent(tab.runId || ""))).json();
     const msgs = d.messages || [];
     const card = addTabMsg(tab, "answer", "");
     if (d.running) card.innerHTML = "<b>（运行中，显示最近消息）</b><br>";
@@ -1915,7 +1931,8 @@ async function execLine(line) {
       : "没有历史消息——先运行一次任务";
     card.style.whiteSpace = "pre-wrap";
   } else if (cmd === "/trace") {
-    const d = await (await fetch("/api/trace")).json();
+    const d = await (await fetch("/api/trace?run_id=" +
+      encodeURIComponent(tab.runId || ""))).json();
     const entries = d.entries || [];
     const card = addTabMsg(tab, "answer", "");
     card.innerHTML = entries.length

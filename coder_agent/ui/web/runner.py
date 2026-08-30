@@ -430,9 +430,15 @@ class RunManager:
     def _latest(self) -> _RunSession | None:
         return self._sessions.get(self._last_run_id or "")
 
-    def agent_summary(self, n: int = 10) -> list[dict]:
-        """最近一次运行的最近 n 条消息摘要（/history 数据源）。"""
-        s = self._latest()
+    def _target(self, run_id: str | None) -> _RunSession | None:
+        """指定会话优先；未指定时回退到最新会话（兼容单会话场景）。"""
+        if run_id and run_id in self._sessions:
+            return self._sessions[run_id]
+        return self._latest()
+
+    def agent_summary(self, n: int = 10, run_id: str | None = None) -> list[dict]:
+        """指定会话（缺省=最新）的最近 n 条消息摘要（/history 数据源）。"""
+        s = self._target(run_id)
         if s is None:
             return []
         msgs = s.messages or []
@@ -447,9 +453,9 @@ class RunManager:
             out.append({"index": i, "role": role, "content": content})
         return out
 
-    def compact_last(self, keep: int = 10) -> dict | None:
-        """手动压缩最近一次运行的消息历史（保留最近 keep 条）。"""
-        s = self._latest()
+    def compact_last(self, keep: int = 10, run_id: str | None = None) -> dict | None:
+        """手动压缩指定会话（缺省=最新）的消息历史（保留最近 keep 条）。"""
+        s = self._target(run_id)
         if s is None:
             return {"ok": False, "error": "尚无历史消息可压缩"}
         if s.thread is not None and s.thread.is_alive():
@@ -461,9 +467,9 @@ class RunManager:
         s.messages = msgs[-keep:]
         return {"ok": True, "before": n, "after": len(s.messages)}
 
-    def trace_summary(self) -> list[dict] | None:
-        """最近一次运行的 trace 摘要（/trace 数据源）。"""
-        s = self._latest()
+    def trace_summary(self, run_id: str | None = None) -> list[dict] | None:
+        """指定会话（缺省=最新）的 trace 摘要（/trace 数据源）。"""
+        s = self._target(run_id)
         if s is None or s.trace is None:
             return None
         try:

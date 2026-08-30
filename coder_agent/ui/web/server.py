@@ -267,25 +267,28 @@ def api_fs_pick():
 
 
 @app.get("/api/context")
-def api_context():
+def api_context(run_id: str | None = None):
     m = get_manager()
-    return {"running": m.running, "messages": m.agent_summary()}
+    return {"running": m.running,
+            "messages": m.agent_summary(run_id=run_id),
+            "run_id": run_id or m._last_run_id}
 
 
 @app.post("/api/compact")
-def api_compact():
+def api_compact(req: dict | None = None):
     m = get_manager()
-    result = m.compact_last()
+    run_id = (req or {}).get("run_id") if req else None
+    result = m.compact_last(run_id=run_id)
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result.get("error"))
     return result
 
 
 @app.get("/api/trace")
-def api_trace():
+def api_trace(run_id: str | None = None):
     m = get_manager()
-    entries = m.trace_summary()
-    return {"entries": entries or []}
+    entries = m.trace_summary(run_id=run_id)
+    return {"entries": entries or [], "run_id": run_id or m._last_run_id}
 
 
 @app.get("/api/status")
