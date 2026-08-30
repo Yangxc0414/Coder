@@ -239,10 +239,22 @@ def api_fs_pick():
     import subprocess
     ps_script = (
         "Add-Type -AssemblyName System.Windows.Forms;"
+        "Add-Type -AssemblyName System.Drawing;"
+        # 隐藏的 TopMost 窗体作为 owner → 对话框显示在所有窗口之上
+        "$w = New-Object System.Windows.Forms.Form;"
+        "$w.TopMost = $true;"
+        "$w.ShowInTaskbar = $false;"
+        "$w.Opacity = 0;"
+        "$w.Size = New-Object System.Drawing.Size(1,1);"
+        "$w.StartPosition = 'Manual';"
+        "$w.Location = New-Object System.Drawing.Point(-32000,-32000);"
+        "$w.Show();"
         "$f = New-Object System.Windows.Forms.FolderBrowserDialog;"
         "$f.Description = '选择工作区文件夹';"
-        "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) "
-        "{ Write-Output $f.SelectedPath } else { Write-Output '' }"
+        "$f.ShowNewFolderButton = $true;"
+        "if ($f.ShowDialog($w) -eq [System.Windows.Forms.DialogResult]::OK) "
+        "{ Write-Output $f.SelectedPath } else { Write-Output '' };"
+        "$w.Close();"
     )
     try:
         r = subprocess.run(
