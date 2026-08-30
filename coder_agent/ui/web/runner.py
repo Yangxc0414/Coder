@@ -445,13 +445,27 @@ class RunManager:
 
     # ── 工具清单 ────────────────────────────────────────────────────────
 
-    def tool_specs(self) -> list[dict]:
-        """当前工作区下模型可用的工具清单（/tools 命令数据源）。"""
+    def tool_specs(self) -> dict:
+        """当前工作区下模型可用的工具清单（按 core/skill/mcp 分类）。
+
+        /tools 命令数据源；分类与扩展系统（extensions/）一致：
+        skill_* 前缀 = 内置技能，mcp_* 前缀 = MCP 工具。
+        """
         from coder_agent.mode import AgentMode
         registry = create_default_registry(self.workspace, AgentMode(self.mode))
         specs = []
+        counts = {"core": 0, "skill": 0, "mcp": 0}
         for schema in registry.list_tools():
             fn = schema.get("function", {})
-            specs.append({"name": fn.get("name", "?"),
-                          "description": (fn.get("description") or "")[:100]})
-        return specs
+            name = fn.get("name", "?")
+            if name.startswith("skill_"):
+                category = "skill"
+            elif name.startswith("mcp_"):
+                category = "mcp"
+            else:
+                category = "core"
+            counts[category] += 1
+            specs.append({"name": name,
+                          "description": (fn.get("description") or "")[:100],
+                          "category": category})
+        return {"tools": specs, "counts": counts}

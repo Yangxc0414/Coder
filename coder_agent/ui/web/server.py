@@ -177,7 +177,7 @@ def api_get_workspace():
 
 @app.get("/api/tools")
 def api_tools():
-    return {"tools": get_manager().tool_specs()}
+    return get_manager().tool_specs()  # {"tools": [...], "counts": {...}}
 
 
 @app.get("/api/models")

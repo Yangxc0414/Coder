@@ -609,6 +609,13 @@ function renderWelcome(tab) {
     '<div class="suggest-chips">' + MODES.map(m =>
       '<span class="chip" title="' + escHtml(m.desc) + '" style="cursor:default;">' + m.name + '</span>'
     ).join("") + '</div>' +
+    '<div class="suggest-label">扩展能力（Extensions）：</div>' +
+    '<div class="suggest-chips">' +
+    '<span class="chip" style="cursor:default;">🎓 5 Skills</span>' +
+    '<span class="chip" style="cursor:default;">🔌 5 MCP 工具</span>' +
+    '<span class="chip" style="cursor:default;">🧩 子代理委托</span>' +
+    '<span class="chip" style="cursor:default;">🧠 记忆工具</span>' +
+    '</div>' +
     '<div class="shortcut-hint">' +
     "<b>Enter</b> 发送 &nbsp; <b>/</b> 命令面板 &nbsp; <b>Ctrl+T</b> 新会话 &nbsp; <b>Ctrl+Tab</b> 切换 &nbsp; <b>Ctrl+W</b> 关闭 &nbsp; <b>Ctrl+L</b> 主题" +
     '</div>';
@@ -723,6 +730,12 @@ function addTurnUserMsg(tab, text) {
   scrollFeedEl(tab.feedEl, true);
   return u;
 }
+function toolBadge(toolName) {
+  // 扩展系统分类标识：skill_* = 内置技能，mcp_* = MCP 工具
+  if (toolName.startsWith("skill_")) return ' <span style="color:var(--ok);font-size:10px;">🎓 skill</span>';
+  if (toolName.startsWith("mcp_")) return ' <span style="color:var(--accent);font-size:10px;">🔌 mcp</span>';
+  return "";
+}
 function appendToolToTurn(tab, ev) {
   if (!tab.turnEl) beginTurn(tab, ev.step || 1);
   const body = tab.turnEl.querySelector(".turn-body");
@@ -735,7 +748,7 @@ function appendToolToTurn(tab, ev) {
   const label = isPolicy ? " 策略拦截" : "";
   det.innerHTML = "<summary>" + mark +
     " <span class='tool-name'>" + escHtml(ev.tool) + "</span>" +
-    label +
+    toolBadge(ev.tool) + label +
     (ev.target ? " <span class='tool-target'>→ " + escHtml(ev.target) + "</span>" : "") +
     "</summary><div class='body'>" +
     (ev.detail ? "<span class='err-label'>" + (isPolicy ? "policy" : "error") + "</span>\n" + escHtml(ev.detail) + "\n" : "") +
@@ -1753,9 +1766,24 @@ async function execLine(line) {
       (runsInfo ? "\n并行会话:\n" + runsInfo : ""));
   } else if (cmd === "/tools") {
     const d = await (await fetch("/api/tools")).json();
+    const tools = d.tools || [];
+    const counts = d.counts || {};
+    const groups = [
+      ["🔧 核心工具 (" + (counts.core || 0) + ")", tools.filter(t => t.category === "core")],
+      ["🎓 Skills 技能 (" + (counts.skill || 0) + ")", tools.filter(t => t.category === "skill")],
+      ["🔌 MCP 工具 (" + (counts.mcp || 0) + ")", tools.filter(t => t.category === "mcp")],
+    ];
     const card = addTabMsg(tab, "answer", "");
-    card.innerHTML = "<b>可用工具 (" + d.tools.length + ")</b><br>" +
-      d.tools.map(t => "  " + t.name + " — " + t.description.substring(0, 60) + "...").join("<br>");
+    let html = "<b>模型可用工具 (" + tools.length + ")</b><br><br>";
+    groups.forEach(([gname, items]) => {
+      html += "<b>" + gname + "</b><br>";
+      items.forEach(t => {
+        html += "  <span style='color:var(--accent);font-family:Consolas,monospace;'>" + escHtml(t.name) + "</span> — " +
+          escHtml(t.description.substring(0, 50)) + "...<br>";
+      });
+      html += "<br>";
+    });
+    card.innerHTML = html;
     card.style.whiteSpace = "pre-wrap";
   } else if (cmd === "/model") {
     if (!arg) {
@@ -1894,6 +1922,7 @@ function renderActivity() {
     html += "<div class='act-section'><div class='as-title'>工具使用</div>";
     toolEntries.slice(0, 8).forEach(([name, cnt]) => {
       html += "<div class='tool-bar-row'><span class='tname'>" + escHtml(name) + "</span>" +
+        toolBadge(name) +
         "<div class='tbar'><i style='width:" + Math.round(cnt / maxCnt * 100) + "%'></i></div>" +
         "<span class='tcnt'>" + cnt + "</span></div>";
     });
