@@ -711,6 +711,7 @@ function beginTurn(tab, step) {
 function addTurnUserMsg(tab, text) {
   // 用户消息进入当前 turn 容器（带 hover 操作按钮）
   if (!tab.turnEl) beginTurn(tab, (tab.stats.steps || 0) + 1);
+  tab.turnStep = null;  // 预建容器未确认：等真实 turn 事件更新徽章，避免错位
   const body = tab.turnEl.querySelector(".turn-body");
   const u = document.createElement("div");
   u.className = "turn-user";
@@ -932,6 +933,19 @@ function onEvent(ev, tab) {
     finalizeStream(tab);
     clearPending(tab);
     addTabMsg(tab, "error", ev.error);
+  } else if (ev.kind === "started") {
+    const div = document.createElement("div");
+    div.className = "turn";
+    div.textContent = "▶ 任务开始: " + (ev.task || "");
+    tab.feedEl.appendChild(div);
+    scrollFeedEl(tab.feedEl, true);
+  } else if (ev.kind === "ended") {
+    const reason = ev.reason || "完成";
+    const div = document.createElement("div");
+    div.className = "turn";
+    div.textContent = "■ 运行结束（" + (ev.steps || "?") + " 步，" + reason + "）";
+    tab.feedEl.appendChild(div);
+    scrollFeedEl(tab.feedEl, true);
   } else if (ev.kind === "status") {
     addTabMsg(tab, "turn", ev.message);
   } else if (ev.kind === "done") {
@@ -1045,6 +1059,7 @@ async function openSession(file) {
   document.querySelectorAll(".session-item").forEach(el => el.classList.toggle("active", el.dataset.file === file));
   tab.feedEl.innerHTML = "";
   tab.turnEl = null; tab.turnStep = null; tab.streamEl = null; tab.pendingEl = null;
+  tab.stateInfo = null;  // 历史模式不显示实时 Agent 状态
   const turns = data.turns || [];
   if (!turns.length) {
     tab.feedEl.innerHTML = '<div style="color:var(--faint);font-size:12px;padding:20px;text-align:center;">该会话暂无消息记录</div>';

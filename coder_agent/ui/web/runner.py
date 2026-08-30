@@ -328,6 +328,15 @@ class RunManager:
                                                                      "budget", "used", "new_max_tokens")})
                 return cb
 
+            def on_started(e):
+                self._emit(run_id, "started",
+                           task=str(e.data.get("task") or "")[:120])
+
+            def on_ended(e):
+                self._emit(run_id, "ended",
+                           steps=e.data.get("steps"),
+                           reason=str(e.data.get("reason") or "")[:60])
+
             last_turn_step: list = [None]
             last_comp: list = [None]
             agent.hooks.register("ASSISTANT_TEXT", on_text)
@@ -339,6 +348,8 @@ class RunManager:
             agent.hooks.register("RECOVERY_EVENT", on_fw_event("recovery"))
             agent.hooks.register("LENGTH_RETRY", on_fw_event("length_retry"))
             agent.hooks.register("BUDGET_EXHAUSTED", on_fw_event("budget_exhausted"))
+            agent.hooks.register("AGENT_STARTED", on_started)
+            agent.hooks.register("AGENT_ENDED", on_ended)
 
             answer = agent.run(task)
             session.final_answer = answer
