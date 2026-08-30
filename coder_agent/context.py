@@ -68,7 +68,7 @@ class ContextManager:
     def __init__(
         self,
         max_tokens: int | None = None,
-        keep_rounds: int = DEFAULT_KEEP_ROUNDS,
+        keep_rounds: int | None = None,
         summary_max_chars: int = DEFAULT_SUMMARY_MAX_CHARS,
         model: str = "gpt-4o",
         context_window: int | None = None,
@@ -78,7 +78,14 @@ class ContextManager:
                                or resolve_context_window(model))
         self.max_tokens = (max_tokens if max_tokens is not None
                            else int(self.context_window * DEFAULT_CONTEXT_RATIO))
-        self.keep_rounds = keep_rounds
+        # 保留轮数自适应：未显式指定时按预算估算——预算越大保留越多
+        # 完整轮次（每轮约 1.5-3K tokens，留出摘要空间）。默认 6 轮在
+        # 典型 8K 预算下合理；128K 预算下 6 轮偏保守，自动放宽到 ~32 轮。
+        if keep_rounds is not None:
+            self.keep_rounds = max(2, int(keep_rounds))
+        else:
+            self.keep_rounds = max(4, min(32,
+                                          self.max_tokens // 2500))
         self.summary_max_chars = summary_max_chars
         # 最近一次 build_messages 的压缩统计（UI 展示用；None=尚未调用/无压缩）
         self.last_compression: dict | None = None

@@ -95,6 +95,11 @@
   .tab-feed > * { flex-shrink: 0; }  /* 关键：flex column 子项默认会压缩内容而非溢出滚动 */
   .tab-feed::-webkit-scrollbar { width: 6px; }
   .tab-feed::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
+  /* 生成中离开底部时的"回到最新"悬浮按钮 */
+  .jump-bottom { position: sticky; bottom: 12px; align-self: center; background: var(--accent2); color: #fff;
+    border: none; border-radius: 16px; padding: 5px 14px; font-size: 11px; cursor: pointer;
+    box-shadow: 0 2px 8px var(--shadow); margin-top: -40px; z-index: 5; }
+  .jump-bottom:hover { filter: brightness(1.1); }
   .message { max-width: 85%; animation: fadeIn .2s ease; position: relative; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
   .user { align-self: flex-end; background: var(--user-bg); border-radius: 12px 12px 2px 12px; padding: 10px 14px; font-size: 13px; line-height: 1.5; }
@@ -501,6 +506,20 @@ function createTab(title) {
   feedEl.className = "tab-feed";
   feedEl.id = "feed-" + id;
   feedArea.appendChild(feedEl);
+  // 滚动跟随：离开底部且运行中显示"回到最新"，允许随时翻页查看
+  feedEl.addEventListener("scroll", () => {
+    const btn = feedEl.querySelector(".jump-bottom");
+    const stick = nearBottom(feedEl);
+    if (!stick && tab.running && !btn) {
+      const b = document.createElement("button");
+      b.className = "jump-bottom";
+      b.textContent = "↓ 回到最新";
+      b.onclick = () => scrollFeedEl(feedEl, true);
+      feedEl.appendChild(b);
+    } else if ((stick || !tab.running) && btn) {
+      btn.remove();
+    }
+  });
   tab.feedEl = feedEl;
   // tab 按钮
   const btn = document.createElement("div");
@@ -1079,6 +1098,12 @@ function onEvent(ev, tab) {
     finalizeStream(tab);
     clearPending(tab);
     setRunning(tab, false);
+    // 生成完毕强制重排滚动容器（修复动态流式内容后滚动条/高度不刷新）
+    const feed = tab.feedEl;
+    feed.style.display = "none";
+    void feed.offsetHeight;  // 强制 reflow，让浏览器重算 scrollHeight
+    feed.style.display = "flex";
+    scrollFeedEl(feed, true);
     if (!tab.endedShown) {
       const div = document.createElement("div");
       div.className = "turn";

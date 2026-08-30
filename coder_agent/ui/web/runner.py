@@ -123,11 +123,13 @@ class RunManager:
         cfg = load_config()
         window = int(cfg.get("context_window") or resolve_context_window(self.model))
         ratio = float(cfg.get("context_ratio") or 0.8)
-        keep = int(cfg.get("keep_rounds") or 6)
+        budget = int(window * ratio)
+        keep = (int(cfg["keep_rounds"]) if cfg.get("keep_rounds")
+                else max(4, min(32, budget // 2500)))  # 自适应
         return {
             "model": self.model,
             "context_window": window,
-            "budget": int(window * ratio),
+            "budget": budget,
             "ratio": ratio,
             "keep_rounds": keep,
         }
@@ -198,7 +200,7 @@ class RunManager:
         cfg = load_config()
         window = int(cfg.get("context_window") or resolve_context_window(self.model))
         ratio = float(cfg.get("context_ratio") or 0.8)
-        keep = int(cfg.get("keep_rounds") or 6)
+        keep = int(cfg["keep_rounds"]) if cfg.get("keep_rounds") else None
         context_manager = ContextManager(
             max_tokens=int(window * ratio), keep_rounds=keep,
             model=self.model, context_window=window)
