@@ -19,7 +19,7 @@ from .verifier import Verifier
 from .recovery import RecoveryStrategy
 from .mode import AgentMode
 from .inspector import ContextInspector
-from .hooks import HookRegistry, install_logging_hooks, install_trace_hooks, PRE_TOOL_USE, POST_TOOL_USE, TURN_STOPPED, AGENT_STARTED, AGENT_ENDED, ASSISTANT_TEXT, VERIFIER_RESULT
+from .hooks import HookRegistry, install_logging_hooks, install_trace_hooks, PRE_TOOL_USE, POST_TOOL_USE, TURN_STOPPED, AGENT_STARTED, AGENT_ENDED, ASSISTANT_TEXT, VERIFIER_RESULT, FORMAT_ERROR, LOOP_DETECTED, RECOVERY_EVENT, LENGTH_RETRY, BUDGET_EXHAUSTED
 from .extensions.base import SubagentRunner
 from .journal import SessionJournal
 
@@ -315,6 +315,9 @@ class Agent:
                         "Token budget %d exhausted (used %d) — requesting wrap-up",
                         self._token_budget, self._tokens_used,
                     )
+                    self.hooks.fire(BUDGET_EXHAUSTED.with_data(
+                        budget=self._token_budget, used=self._tokens_used,
+                        step=self._n_steps))
                     self.trace.record(
                         self._n_steps, "budget_exhausted",
                         tokens_used=self._tokens_used, budget=self._token_budget,
@@ -431,6 +434,10 @@ class Agent:
                     and not self._loop_warning_injected
                 ):
                     logger.warning("Loop detected, injecting guidance")
+                    self.hooks.fire(LOOP_DETECTED.with_data(
+                        step=self._n_steps,
+                        reason=("same-file churn" if self.state.get_loop_risk()
+                                else "repeated identical action")))
                     self._append_message({
                         "role": "user",
                         "content": (
@@ -454,6 +461,10 @@ class Agent:
                             "role": "user",
                             "content": result.message,
                         })
+                    self.hooks.fire(RECOVERY_EVENT.with_data(
+                        action=result.action,
+                        message=(result.message or "")[:200],
+                        step=self._n_steps))
                     self.trace.record(
                         self._n_steps, "recovery",
                         action=result.action, recovered=True,
@@ -530,6 +541,8 @@ class Agent:
                 "Response truncated by max_tokens — retrying with %d",
                 self._llm_max_tokens,
             )
+            self.hooks.fire(LENGTH_RETRY.with_data(
+                step=self._n_steps, new_max_tokens=self._llm_max_tokens))
             self.trace.record(self._n_steps, "length_truncated")
             response = self.llm.chat(
                 messages=messages_for_api,
@@ -709,6 +722,9 @@ class Agent:
             MAX_CONSECUTIVE_FORMAT_ERRORS,
             error,
         )
+        self.hooks.fire(FORMAT_ERROR.with_data(
+            error=str(error)[:200], attempt=self._n_format_errors,
+            max_attempts=MAX_CONSECUTIVE_FORMAT_ERRORS, step=self._n_steps))
         self.trace.record(
             self._n_steps, "format_error",
             error=str(error)[:200], attempt=self._n_format_errors,

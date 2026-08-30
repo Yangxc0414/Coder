@@ -734,7 +734,33 @@ function toolBadge(toolName) {
   // 扩展系统分类标识：skill_* = 内置技能，mcp_* = MCP 工具
   if (toolName.startsWith("skill_")) return ' <span style="color:var(--ok);font-size:10px;">🎓 skill</span>';
   if (toolName.startsWith("mcp_")) return ' <span style="color:var(--accent);font-size:10px;">🔌 mcp</span>';
+  if (toolName === "task") return ' <span style="color:var(--accent2);font-size:10px;">🧩 子代理</span>';
+  if (toolName === "memory") return ' <span style="color:var(--ok);font-size:10px;">🧠 记忆</span>';
   return "";
+}
+const FW_EVENTS = {
+  format_error: { icon: "⚠️", label: "格式错误 → 注入纠正指令" },
+  loop_detected: { icon: "🔄", label: "循环检测 → 注入指导" },
+  recovery: { icon: "🛟", label: "意外错误 → 恢复重试" },
+  length_retry: { icon: "📏", label: "输出截断 → 加倍预算重试" },
+  budget_exhausted: { icon: "💰", label: "token 预算耗尽 → 请求收尾" },
+};
+function renderFrameworkEvent(tab, ev) {
+  const meta = FW_EVENTS[ev.type] || { icon: "ℹ️", label: ev.type };
+  let extra = "";
+  if (ev.type === "format_error" && ev.attempt) {
+    extra = "（第 " + ev.attempt + "/" + (ev.max_attempts || "?") + " 次）";
+  } else if (ev.type === "budget_exhausted" && ev.budget) {
+    extra = "（" + ev.used + "/" + ev.budget + "）";
+  } else if (ev.type === "length_retry" && ev.new_max_tokens) {
+    extra = "（→ " + ev.new_max_tokens + "）";
+  }
+  const div = document.createElement("div");
+  div.className = "turn";
+  div.textContent = meta.icon + " " + meta.label + extra +
+    (ev.detail ? " — " + ev.detail : "");
+  tab.feedEl.appendChild(div);
+  scrollFeedEl(tab.feedEl, nearBottom(tab.feedEl));
 }
 function appendToolToTurn(tab, ev) {
   if (!tab.turnEl) beginTurn(tab, ev.step || 1);
@@ -855,6 +881,9 @@ function onEvent(ev, tab) {
   } else if (ev.kind === "verifier") {
     clearPending(tab);
     appendVerifierCard(tab, ev);
+  } else if (ev.kind === "event") {
+    // 框架内部事件：格式错误/循环检测/恢复/截断/预算（约束恢复与错误处理）
+    renderFrameworkEvent(tab, ev);
   } else if (ev.kind === "compress") {
     appendCompressCard(tab, ev);
   } else if (ev.kind === "turn") {

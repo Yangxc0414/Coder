@@ -42,6 +42,12 @@ AGENT_STARTED = HookEvent("AGENT_STARTED")
 AGENT_ENDED = HookEvent("AGENT_ENDED")
 ASSISTANT_TEXT = HookEvent("ASSISTANT_TEXT")
 VERIFIER_RESULT = HookEvent("VERIFIER_RESULT")  # 校验结果（passed + summary）
+# 约束恢复 / 错误处理 / 终止条件（可观测化，UI 展示框架内部行为）
+FORMAT_ERROR = HookEvent("FORMAT_ERROR")        # 模型输出格式解析失败
+LOOP_DETECTED = HookEvent("LOOP_DETECTED")      # 循环检测 → 注入指导
+RECOVERY_EVENT = HookEvent("RECOVERY_EVENT")    # 意外错误恢复
+LENGTH_RETRY = HookEvent("LENGTH_RETRY")        # 输出截断 → 加倍预算重试
+BUDGET_EXHAUSTED = HookEvent("BUDGET_EXHAUSTED")  # token 预算耗尽
 
 
 class HookRegistry:

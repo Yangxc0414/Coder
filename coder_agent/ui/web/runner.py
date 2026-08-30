@@ -316,12 +316,29 @@ class RunManager:
                            summary=str(e.data.get("summary") or "")[:400],
                            step=e.data.get("step"))
 
+            def on_fw_event(kind):
+                def cb(e):
+                    data = dict(e.data)
+                    data.pop("step", None)
+                    detail = data.pop("error", None) or data.pop("message", None) \
+                        or data.pop("reason", None) or data.pop("action", None) or ""
+                    self._emit(run_id, "event", type=kind,
+                               detail=str(detail)[:160], **{k: v for k, v in data.items()
+                                                            if k in ("attempt", "max_attempts",
+                                                                     "budget", "used", "new_max_tokens")})
+                return cb
+
             last_turn_step: list = [None]
             last_comp: list = [None]
             agent.hooks.register("ASSISTANT_TEXT", on_text)
             agent.hooks.register("POST_TOOL_USE", on_tool)
             agent.hooks.register("TURN_STOPPED", on_turn)
             agent.hooks.register("VERIFIER_RESULT", on_verifier)
+            agent.hooks.register("FORMAT_ERROR", on_fw_event("format_error"))
+            agent.hooks.register("LOOP_DETECTED", on_fw_event("loop_detected"))
+            agent.hooks.register("RECOVERY_EVENT", on_fw_event("recovery"))
+            agent.hooks.register("LENGTH_RETRY", on_fw_event("length_retry"))
+            agent.hooks.register("BUDGET_EXHAUSTED", on_fw_event("budget_exhausted"))
 
             answer = agent.run(task)
             session.final_answer = answer
