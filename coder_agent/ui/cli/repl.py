@@ -153,6 +153,9 @@ class CoderRepl:
         self._console.print(f"  Rounds:      {info['rounds_count']} (keeping {info['keep_rounds']} full)")
         status_icon = "⚠️" if info['needs_compression'] else "✅"
         self._console.print(f"  Status:      {status_icon} {'NEEDS COMPRESSION' if info['needs_compression'] else 'OK'}")
+        if info['needs_compression']:
+            self._console.print(
+                "  [dim]ℹ 以上为原始历史累计；LLM 实际收到的是自动压缩后的视图[/dim]")
         self._console.print(f"  Mode:        {self.state.mode.value}")
         self._console.print(f"  Steps:       {self.state.steps}")
         if self.state.trace_recorder.get_entries():
@@ -166,13 +169,15 @@ class CoderRepl:
         """Show available commands."""
         help_text = """
 [bold yellow]Available Commands:[/bold yellow]
-  [cyan]/run <task>[/cyan]     Run agent on a task (journaled for later /resume)
+  [cyan]<task>[/cyan] or /run  Run agent on a task (each /run is a fresh, isolated context;
+                                journaled for later /resume)
   [cyan]/resume <file>[/cyan]  Restore a journaled session and continue it
   [cyan]/sessions[/cyan]       List journaled sessions
   [cyan]/mode <name>[/cyan]     Switch mode: goal / plan / dry-run / full (next /run)
+  [cyan]/model <name>[/cyan]    Switch model (next /run)
   [cyan]/status[/cyan]          Show context status
   [cyan]/tools[/cyan]           List tools available to the model
-  [cyan]/compact[/cyan]         Force context compression
+  [cyan]/compact[/cyan]         Compact last-run history (runs auto-compact anyway)
   [cyan]/history[/cyan]         Show recent memory
   [cyan]/trace[/cyan]           Show trace summary
   [cyan]/clear[/cyan]           Clear conversation display state
@@ -254,6 +259,15 @@ class CoderRepl:
                 self._console.print("[red]Usage: /run <task description>[/red]")
             else:
                 self._run_task(arg)
+        elif cmd == "/model":
+            if not arg:
+                self._console.print(
+                    f"[yellow]Current model:[/yellow] {self.model}  "
+                    "[dim]Usage: /model <name>（对下一次 /run 生效）[/dim]")
+            else:
+                self.model = arg.strip()
+                self._console.print(f"[green]✓ Model switched to: {self.model}[/green] "
+                                    f"[dim]（下次 /run 生效）[/dim]")
         elif cmd == "/resume":
             if not arg:
                 self._console.print("[red]Usage: /resume <journal.jsonl> [continuation instruction][/red]")
@@ -352,6 +366,15 @@ class CoderRepl:
         agent.hooks.register("POST_TOOL_USE", _on_post_tool)
         agent.hooks.register("TURN_STOPPED", _on_turn)
 
+        def _on_assistant_text(event) -> None:
+            # 模型在工具调用之间的计划/分析——不显示会显得"卡住"
+            text = (event.data.get("text") or "").strip()
+            if text:
+                shown = text if len(text) <= 600 else text[:600] + "…"
+                self._console.print(f"[dim]│ {shown}[/dim]")
+
+        agent.hooks.register("ASSISTANT_TEXT", _on_assistant_text)
+
         try:
             answer = agent.run(task, resume=resume)
             self.state.steps = agent.state.step
@@ -381,7 +404,9 @@ class CoderRepl:
     def run(self) -> int:
         """Run the interactive REPL."""
         self._print_header()
-        self._show_help()
+        interactive = sys.stdin.isatty()
+        if interactive:
+            self._show_help()  # batch 模式下输出要干净，命令靠 /help 查看
 
         # Check if running in non-interactive mode
         if not sys.stdin.isatty():
@@ -453,6 +478,14 @@ def main() -> int:
     args = parser.parse_args()
 
     workspace = Path(args.workspace).resolve()
+
+    # 启动预检：API 配置缺失到第一次调用才暴露，对新手是 3 分钟的困惑
+    import os
+    if not os.getenv("OPENAI_API_KEY"):
+        Console().print(
+            "[yellow]⚠ OPENAI_API_KEY 未设置——/run 将失败。"
+            "  请在工作区创建 .env（参考 .env.example）后重启。[/yellow]")
+
     repl = CoderRepl(
         workspace=workspace,
         model=args.model,

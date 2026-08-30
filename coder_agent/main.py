@@ -148,6 +148,8 @@ def main() -> None:
         task = task or DEFAULT_RESUME_PROMPT
         print(f"\nResuming session: {args.resume}")
         print(f"Restored: {len(restored['messages'])} messages")
+    if not os.getenv("OPENAI_API_KEY"):
+        print("⚠ 警告: OPENAI_API_KEY 未设置（.env 缺失或未配置）——API 调用将失败")
     print(f"\nTask: {task[:100]}{'...' if len(task) > 100 else ''}")
     print(f"Workspace: {workspace}")
     print(f"Model: {args.model}")

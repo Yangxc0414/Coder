@@ -19,7 +19,7 @@ from .verifier import Verifier
 from .recovery import RecoveryStrategy
 from .mode import AgentMode
 from .inspector import ContextInspector
-from .hooks import HookRegistry, install_logging_hooks, install_trace_hooks, PRE_TOOL_USE, POST_TOOL_USE, TURN_STOPPED, AGENT_STARTED, AGENT_ENDED
+from .hooks import HookRegistry, install_logging_hooks, install_trace_hooks, PRE_TOOL_USE, POST_TOOL_USE, TURN_STOPPED, AGENT_STARTED, AGENT_ENDED, ASSISTANT_TEXT
 from .extensions.base import SubagentRunner
 from .journal import SessionJournal
 
@@ -260,6 +260,12 @@ class Agent:
                     finish_reason=response.finish_reason,
                     tokens_used=self._tokens_used,
                 )
+
+                # 思考文本（模型在调用工具之间的计划/分析）——REPL 等宿主
+                # 用它消除"两个工具调用之间长时间静止"的观感
+                if response.content and response.tool_calls:
+                    self.hooks.fire(
+                        ASSISTANT_TEXT.with_data(text=response.content, step=self._n_steps))
 
                 # Token budget: one wrap-up round, then a hard stop.
                 # The three ways an agent runs away — too many steps, too
