@@ -156,6 +156,12 @@
   .md code.inline { background: var(--bg3); border-radius: 4px; padding: 2px 6px; font-family: Consolas, monospace; color: var(--code-text); font-size: 12px; }
   .md ul, .md ol { margin: 8px 0 8px 20px; }
   .md li { margin: 4px 0; line-height: 1.5; }
+  .md-table { border-collapse: collapse; margin: 10px 0; width: 100%; font-size: 12px; }
+  .md-table th, .md-table td { border: 1px solid var(--border2); padding: 6px 10px; text-align: left; }
+  .md-table th { background: var(--bg3); color: var(--text); font-weight: 600; }
+  .md-table td { color: var(--muted); }
+  .md-table tr:nth-child(even) td { background: var(--bg4); }
+  .md-table td code.inline { font-size: 11px; }
   .copy-btn { position: absolute; top: 8px; right: 8px; background: var(--bg3); color: var(--faint); border: 1px solid var(--border); border-radius: 4px; font-size: 10px; padding: 3px 8px; cursor: pointer; transition: all .15s; }
   .copy-btn:hover { color: var(--accent); border-color: var(--accent); }
 
@@ -576,6 +582,25 @@ function renderWelcome(tab) {
 }
 
 /* ═══════════ Mini-Markdown ═══════════ */
+function mdInline(s) {
+  // 单元格内联：粗体 + 行内代码
+  return s
+    .replace(/`([^`\n]+)`/g, '<code class="inline">$1</code>')
+    .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+}
+function renderTable(block) {
+  const lines = block.trim().split("\n").map(l => l.trim());
+  const splitRow = (l) => l.replace(/^\|/, "").replace(/\|$/, "").split("|").map(c => c.trim());
+  const rows = lines.map(splitRow);
+  if (!rows.length || rows.length < 2) return block;
+  let html = "<table class='md-table'><thead><tr>" +
+    rows[0].map(h => "<th>" + mdInline(h) + "</th>").join("") +
+    "</tr></thead><tbody>";
+  for (let i = 2; i < rows.length; i++) {
+    html += "<tr>" + rows[i].map(c => "<td>" + mdInline(c) + "</td>").join("") + "</tr>";
+  }
+  return html + "</tbody></table>";
+}
 function renderMarkdown(md) {
   if (!md) return document.createElement("div");
   const blocks = md.split(/\n```/);
@@ -592,6 +617,16 @@ function renderMarkdown(md) {
       return;
     }
     let seg = escHtml(blk);
+    // 表格块：表头行 + 分隔行（|---|）+ 数据行，整体转 <table>
+    seg = seg.replace(
+      /((?:^\|[^\n]+\|\s*\n)+(?:^\|[\s:|-]+\|\s*\n)(?:(?:^\|[^\n]+\|\s*\n)*))/gm,
+      (match) => {
+        const ls = match.trim().split("\n").map(l => l.trim());
+        if (ls.length < 2) return match;
+        if (!/^\|[\s:|-]+\|$/.test(ls[1])) return match;
+        return renderTable(match);
+      }
+    );
     seg = seg.replace(/`([^`\n]+)`/g, '<code class="inline">$1</code>');
     seg = seg.replace(/^###\s?(.+)$/gm, "<h3>$1</h3>");
     seg = seg.replace(/^##\s?(.+)$/gm, "<h2>$1</h2>");
