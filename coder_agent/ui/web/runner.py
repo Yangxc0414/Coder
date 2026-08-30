@@ -568,4 +568,15 @@ class RunManager:
                 "parameters": t.parameters,
                 "enabled": t.name not in disabled_mcp,
             })
-        return {"skills": skills, "mcp": mcp}
+        # 子代理（任务委托编排，展示型）
+        from coder_agent.extensions.subagents import get_builtin_subagents
+        subagents = []
+        for d in get_builtin_subagents():
+            subagents.append({
+                "name": getattr(d, "name", "?"),
+                "tools": list(getattr(d, "tools", ()) or ()),
+                "read_only": bool(getattr(d, "read_only", False)),
+                "max_steps": getattr(d, "max_steps", None),
+                "when_to_use": str(getattr(d, "when_to_use", "") or "")[:100],
+            })
+        return {"skills": skills, "mcp": mcp, "subagents": subagents}

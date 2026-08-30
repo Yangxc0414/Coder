@@ -624,13 +624,14 @@ function renderWelcome(tab) {
     '<div class="suggest-chips">' + MODES.map(m =>
       '<span class="chip" title="' + escHtml(m.desc) + '" style="cursor:default;">' + m.name + '</span>'
     ).join("") + '</div>' +
-    '<div class="suggest-label">扩展能力（Extensions）：</div>' +
+    '<div class="suggest-label">扩展能力（点击进入管理）：</div>' +
     '<div class="suggest-chips">' +
-    '<span class="chip" style="cursor:default;" title="code_review / test_writer / refactor / docstring / security_audit">🎓 5 Skills</span>' +
-    '<span class="chip" style="cursor:default;" title="git_log / git_status / git_diff / system_info / read_trace">🔌 5 MCP 工具</span>' +
-    '<span class="chip" style="cursor:default;">🧩 子代理委托</span>' +
-    '<span class="chip" style="cursor:default;">🧠 记忆工具</span>' +
-    '<span class="chip" style="cursor:default;color:var(--faint);" title="输入 /skills /mcp 查看详情">/skills · /mcp</span>' +
+    '<button class="chip" onclick="openExtModal(\'skills\')" title="点击管理 Skills">🎓 Skills</button>' +
+    '<button class="chip" onclick="openExtModal(\'mcp\')" title="点击管理 MCP 工具">🔌 MCP 工具</button>' +
+    '<button class="chip" onclick="openExtModal(\'subagents\')" title="子代理委托编排">🧩 子代理委托</button>' +
+    '<button class="chip" onclick="openExtModal(\'memory\')" title="记忆工具说明">🧠 记忆工具</button>' +
+    '<button class="chip" onclick="inputEl.value=\'/skills\';execLine(\'/skills\');inputEl.value=\'\';" title="在对话中显示 Skills 详情">/skills 详情</button>' +
+    '<button class="chip" onclick="inputEl.value=\'/mcp\';execLine(\'/mcp\');inputEl.value=\'\';" title="在对话中显示 MCP 详情">/mcp 详情</button>' +
     '</div>' +
     '<div class="shortcut-hint">' +
     "<b>Enter</b> 发送 &nbsp; <b>/</b> 命令面板 &nbsp; <b>Ctrl+T</b> 新会话 &nbsp; <b>Ctrl+Tab</b> 切换 &nbsp; <b>Ctrl+W</b> 关闭 &nbsp; <b>Ctrl+L</b> 主题" +
@@ -1641,10 +1642,14 @@ async function openConfigModal() {
 }
 function closeConfigModal() { document.getElementById("configModal").classList.remove("show"); }
 
-/* ═══════════ 扩展管理（Skills / MCP 启用禁用） ═══════════ */
-async function openExtModal() {
+/* ═══════════ 扩展管理（Skills / MCP / 子代理） ═══════════ */
+async function openExtModal(section) {
   document.getElementById("extModal").classList.add("show");
   await renderExtList();
+  if (section) {
+    const el = document.getElementById("ext-" + section);
+    if (el) el.scrollIntoView({ block: "start" });
+  }
 }
 function closeExtModal() { document.getElementById("extModal").classList.remove("show"); }
 async function renderExtList() {
@@ -1653,18 +1658,36 @@ async function renderExtList() {
   let html = "";
   // Skills
   const skills = d.skills || [];
-  html += "<div class='act-section'><div class='as-title'>🎓 Skills (" + skills.length + ")</div>";
-  skills.forEach(s => {
-    html += extRow("skill", s);
-  });
+  html += "<div class='act-section' id='ext-skills'><div class='as-title'>🎓 Skills (" + skills.length + ")</div>";
+  skills.forEach(s => { html += extRow("skill", s); });
   html += "</div>";
   // MCP（按服务器分组）
   const mcp = d.mcp || {};
+  html += "<div class='act-section' id='ext-mcp'><div class='as-title'>🔌 MCP 工具 (" +
+    Object.values(mcp).reduce((n, v) => n + v.length, 0) + ")</div>";
   Object.keys(mcp).forEach(srv => {
-    html += "<div class='act-section'><div class='as-title'>🔌 MCP · " + escHtml(srv) + " (" + mcp[srv].length + ")</div>";
+    html += "<div style='font-size:11px;color:var(--muted);margin:6px 0 2px;'>🖥 服务器: " + escHtml(srv) + "</div>";
     mcp[srv].forEach(t => { html += extRow("mcp", t); });
-    html += "</div>";
   });
+  html += "</div>";
+  // 子代理（展示型）
+  const subs = d.subagents || [];
+  html += "<div class='act-section' id='ext-subagents'><div class='as-title'>🧩 子代理委托 (" + subs.length + ")</div>";
+  subs.forEach(s => {
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--border);">' +
+      '<div style="flex:1;min-width:0;">' +
+      '<span style="color:var(--accent2);font-family:Consolas,monospace;font-size:12px;">' + escHtml(s.name) + '</span>' +
+      (s.read_only ? ' <span style="color:var(--muted);font-size:10px;">只读</span>' : '') +
+      (s.max_steps ? ' <span style="color:var(--faint);font-size:10px;">max ' + s.max_steps + ' 步</span>' : '') +
+      '<div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🔧 ' +
+      escHtml((s.tools || []).join(", ")) + (s.when_to_use ? " | 🕐 " + escHtml(s.when_to_use) : "") +
+      '</div></div></div>';
+  });
+  html += "</div>";
+  // Memory 工具说明
+  html += "<div class='act-section' id='ext-memory'><div class='as-title'>🧠 记忆工具</div>" +
+    '<div style="font-size:11px;color:var(--muted);padding:6px 8px;">' +
+    "memory 工具：模型可写入的长程事实，持久化到 .coder_memory.md 并注入系统提示（Memory.long_term）</div></div>";
   body.innerHTML = html;
   // 绑定开关
   body.querySelectorAll(".ext-toggle").forEach(btn => {
