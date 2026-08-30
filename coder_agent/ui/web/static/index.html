@@ -39,6 +39,7 @@
   .sidebar-tab.active { background: var(--user-bg); border-color: var(--accent); color: var(--accent); }
   .sidebar-tab:hover:not(.active) { border-color: var(--border2); color: var(--text); }
   .sidebar-content { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 14px; display: flex; flex-direction: column; }
+  .sidebar-content > * { flex-shrink: 0; }
   #pane-files { display: none; }
   .sidebar-content::-webkit-scrollbar { width: 4px; }
   .sidebar-content::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 2px; }
@@ -91,6 +92,7 @@
   #feedArea { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
   .tab-feed { display: none; flex: 1; min-height: 0; overflow-y: auto; padding: 16px; flex-direction: column; gap: 10px; }
   .tab-feed.active { display: flex; }
+  .tab-feed > * { flex-shrink: 0; }  /* 关键：flex column 子项默认会压缩内容而非溢出滚动 */
   .tab-feed::-webkit-scrollbar { width: 6px; }
   .tab-feed::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
   .message { max-width: 85%; animation: fadeIn .2s ease; position: relative; }
@@ -213,6 +215,7 @@
   #fileBody::-webkit-scrollbar { width: 6px; }
   #fileBody::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
   #dirList { max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+  #dirList > * { flex-shrink: 0; }
   #dirList::-webkit-scrollbar { width: 4px; }
   #dirList::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 2px; }
   #modelDropdown { display: none; position: absolute; top: 100%; left: 0; margin-top: 4px; background: var(--bg2); border: 1px solid var(--border2); border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 30; min-width: 220px; box-shadow: 0 4px 12px var(--shadow); }
@@ -244,6 +247,7 @@
   .activity-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 600; color: var(--text); }
   .activity-header button { background: none; border: none; color: var(--faint); cursor: pointer; font-size: 14px; }
   .activity-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+  .activity-body > * { flex-shrink: 0; }
   .activity-body::-webkit-scrollbar { width: 4px; }
   .activity-body::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 2px; }
   .act-section .as-title { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
