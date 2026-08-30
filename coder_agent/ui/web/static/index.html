@@ -637,12 +637,14 @@ function renderWelcome(tab) {
     '<div class="shortcut-hint">' +
     "<b>Enter</b> 发送 &nbsp; <b>/</b> 命令面板 &nbsp; <b>Ctrl+T</b> 新会话 &nbsp; <b>Ctrl+Tab</b> 切换 &nbsp; <b>Ctrl+W</b> 关闭 &nbsp; <b>Ctrl+L</b> 主题" +
     '</div>';
-  w.querySelectorAll(".chip").forEach(c => {
+  // 建议任务 chips（只绑定有 data-s 的，模式 chips 排除在外）
+  w.querySelectorAll(".chip[data-s]").forEach(c => {
     c.onclick = () => { inputEl.value = c.dataset.s; inputEl.focus(); };
   });
-  // 模式 chips：点击切换 header 模式 select（与框架 AgentMode 一致）
-  bindModeChips(tab.feedEl);
   tab.feedEl.appendChild(w);
+  // 模式 chips：点击切换 header 模式 select（与框架 AgentMode 一致）
+  // 必须在 appendChild 之后绑定（chips 已挂到 DOM）
+  bindModeChips(tab.feedEl);
 }
 
 function bindModeChips(scope) {
@@ -663,8 +665,8 @@ function bindModeChips(scope) {
       document.getElementById("mode").value = mode;  // 与 header select 同步
       sync();
       const t = activeTab();
-      if (t) addTabMsg(t, "turn", "⚙ 模式已切换: " + mode +
-        "（" + (MODES.find(m => m.name === mode) || {}).desc + "）");
+      const desc = (MODES.find(m => m.name === mode) || {}).desc || "执行模式";
+      if (t) addTabMsg(t, "turn", "⚙ 模式已切换: " + mode + "（" + desc + "）");
     };
   });
   sync();
