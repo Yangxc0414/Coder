@@ -408,10 +408,11 @@
   <div class="modal-content">
     <div class="modal-header"><b>选择工作区文件夹</b><button class="modal-close" onclick="closeFolderDialog()">✕</button></div>
     <div id="crumb" style="font-size:12px;color:var(--accent);margin-bottom:12px;word-break:break-all;"></div>
-    <div id="dirList"></div>
-    <div style="display:flex;gap:8px;margin-top:16px;">
+    <div id="dirList" style="max-height:340px;"></div>
+    <div style="display:flex;gap:8px;margin-top:16px;align-items:center;">
       <button class="primary" onclick="chooseFolder()">选择当前目录</button>
       <button class="header-btn" onclick="upFolder()">上一级</button>
+      <button class="header-btn" style="margin-left:auto;" onclick="pickSystemDialog()" title="备用：使用系统原生对话框">🖥 系统对话框</button>
     </div>
   </div>
 </div>
@@ -1381,9 +1382,15 @@ async function viewFile(path) {
 }
 function closeFileViewer() { document.getElementById("fileModal").classList.remove("show"); }
 
-/* ═══════════ 打开文件夹 ═══════════ */
+/* ═══════════ 打开文件夹（网页内选择优先） ═══════════ */
 let browseCurrent = "";
 async function openFolderDialog() {
+  // 默认网页内文件夹浏览器（不弹系统对话框，避免遮挡）
+  document.getElementById("folderModal").classList.add("show");
+  browseFolder("");
+}
+async function pickSystemDialog() {
+  // 备用入口：系统原生文件夹对话框
   try {
     const resp = await fetch("/api/fs/pick", { method: "POST" });
     const data = await resp.json();
@@ -1391,9 +1398,9 @@ async function openFolderDialog() {
       await applyWorkspace(data.path);
       return;
     }
-  } catch (e) { /* fallback */ }
-  document.getElementById("folderModal").classList.add("show");
-  browseFolder("");
+  } catch (e) { /* ignore */ }
+  const t = activeTab();
+  if (t) addTabMsg(t, "error", "系统对话框不可用——请使用网页内选择");
 }
 async function applyWorkspace(path) {
   const resp = await fetch("/api/workspace", {
@@ -1420,16 +1427,69 @@ function closeFolderDialog() { document.getElementById("folderModal").classList.
 async function browseFolder(path) {
   const data = await (await fetch("/api/fs/browse?path=" + encodeURIComponent(path))).json();
   browseCurrent = data.current;
-  document.getElementById("crumb").textContent = data.current || "（选择盘符）";
+  // 面包屑：路径层级可点击跳转
+  const crumb = document.getElementById("crumb");
+  crumb.innerHTML = "";
+  const curWs = (await (await fetch("/api/workspace")).json()).workspace;
+  if (data.drives) {
+    crumb.textContent = "（选择盘符）";
+  } else {
+    const parts = data.current.split(/[\\/]/).filter(Boolean);
+    let acc = "";
+    // 盘符（如 C:）作为第一段
+    const driveMatch = data.current.match(/^[A-Za-z]:/);
+    if (driveMatch) {
+      const drive = driveMatch[0] + "\\";
+      const dSpan = document.createElement("span");
+      dSpan.textContent = drive;
+      dSpan.style.cssText = "cursor:pointer;";
+      dSpan.onclick = () => browseFolder(drive);
+      crumb.appendChild(dSpan);
+      parts.shift();  // 去掉盘符段（已显示）
+    }
+    parts.forEach((seg, i) => {
+      acc += (acc ? "\\" : "") + seg;
+      const sep = document.createElement("span");
+      sep.textContent = " / ";
+      sep.style.cssText = "color:var(--faint);";
+      const span = document.createElement("span");
+      span.textContent = seg;
+      span.style.cssText = "cursor:pointer;";
+      const full = driveMatch ? driveMatch[0] + "\\" + acc : acc;
+      span.onclick = () => browseFolder(full);
+      crumb.appendChild(sep);
+      crumb.appendChild(span);
+    });
+  }
   const list = document.getElementById("dirList");
   list.innerHTML = "";
+  // 目录（点击进入，当前工作区高亮）
   data.dirs.forEach(d => {
     const b = document.createElement("div");
     b.className = "folder-item";
     b.textContent = "📁 " + d.split(/[\\/]/).pop();
+    if (curWs && d.toLowerCase() === curWs.toLowerCase()) {
+      b.style.cssText += "border-color:var(--ok);color:var(--ok);";
+      b.textContent += "（当前工作区）";
+    }
     b.onclick = () => browseFolder(d);
     list.appendChild(b);
   });
+  // 文件（灰色展示，不可选为工作区）
+  (data.files || []).forEach(f => {
+    const b = document.createElement("div");
+    b.className = "file-item";
+    b.style.cssText = "opacity:.55;cursor:default;";
+    b.textContent = "📄 " + f;
+    b.title = "文件不可作为工作区，请选择目录";
+    list.appendChild(b);
+  });
+  if (!data.dirs.length && !(data.files || []).length && !data.drives) {
+    const empty = document.createElement("div");
+    empty.style.cssText = "color:var(--faint);font-size:12px;padding:12px;text-align:center;";
+    empty.textContent = "（空目录）";
+    list.appendChild(empty);
+  }
 }
 async function upFolder() {
   const crumb = document.getElementById("crumb").textContent;

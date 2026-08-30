@@ -139,25 +139,35 @@ def api_resume(req: RunRequest):
 
 @app.get("/api/fs/browse")
 def api_fs_browse(path: str = ""):
-    """列出目录下的子目录（供"打开文件夹"导航）；path 为空时列出盘符。"""
+    """列出目录下的子目录与文件（供网页内文件夹选择器导航）。
+
+    path 为空时列出盘符。文件列表用于展示（不可作为工作区选择）。
+    """
     import string
 
     if not path:
         drives = [d + ":\\" for d in string.ascii_uppercase
                   if os.path.exists(d + ":\\")]
-        return {"current": "", "parent": None, "dirs": drives, "drives": True}
+        return {"current": "", "parent": None, "dirs": drives,
+                "drives": True, "files": []}
     p = Path(path)
     if not p.is_dir():
         raise HTTPException(status_code=404, detail="目录不存在")
     dirs = []
+    files = []
     try:
         for child in sorted(p.iterdir()):
-            if child.is_dir() and not child.name.startswith("."):
+            if child.name.startswith("."):
+                continue
+            if child.is_dir():
                 dirs.append(str(child))
+            else:
+                files.append(child.name)
     except (OSError, PermissionError) as e:
         raise HTTPException(status_code=403, detail=f"无法读取目录: {e}")
     parent = str(p.parent) if p.parent != p else None
-    return {"current": str(p), "parent": parent, "dirs": dirs, "drives": False}
+    return {"current": str(p), "parent": parent, "dirs": dirs,
+            "drives": False, "files": files}
 
 
 @app.post("/api/workspace")
