@@ -1055,7 +1055,8 @@ async function loadFiles(dir, container, depth) {
     up.className = "file-item";
     up.textContent = "↰ ..";
     up.style.paddingLeft = pad + "px";
-    up.onclick = () => loadFiles(data.parent, rootContainer, 0);
+    // 返回上一级：container=null 触发整体清空重建（否则会在下方追加新树）
+    up.onclick = () => loadFiles(data.parent, null, 0);
     rootContainer.appendChild(up);
   }
   data.dirs.forEach(di => {
