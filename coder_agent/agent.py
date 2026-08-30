@@ -651,6 +651,11 @@ class Agent:
             success=result.success,
             error=result.error,
             output_len=len(result.output),
+            # 加富数据：客户端展示文件路径/命令与输出预览（折叠详情用）
+            target=str(parsed.arguments.get("path")
+                       or parsed.arguments.get("command")
+                       or parsed.arguments.get("pattern") or "")[:160],
+            preview=(result.output or result.error or "")[:600],
         ))
 
         # LLM progress tracking (progress/full modes)

@@ -104,10 +104,13 @@ class RunManager:
                 self._emit("tool", tool=e.data.get("tool_name", "?"),
                            success=bool(e.data.get("success")),
                            step=agent._n_steps,
-                           detail=str(e.data.get("error") or "")[:120])
+                           target=str(e.data.get("target") or "")[:160],
+                           detail=str(e.data.get("error") or "")[:120],
+                           preview=str(e.data.get("preview") or "")[:600])
 
             def on_turn(e):
-                self._emit("turn", step=e.data.get("step"))
+                self._emit("turn", step=e.data.get("step"),
+                           tokens=agent._tokens_used)
 
             agent.hooks.register("ASSISTANT_TEXT", on_text)
             agent.hooks.register("POST_TOOL_USE", on_tool)

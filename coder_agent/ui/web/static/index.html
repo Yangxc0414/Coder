@@ -35,6 +35,31 @@
   #palette .item .name { color:#4fc3f7; font-family:Consolas,monospace; min-width:150px; }
   #palette .item .desc { color:#8e9aa8; font-size:12px; }
   #palette .empty { padding:8px 12px; color:#555e6a; font-size:12px; }
+  .md h1,.md h2,.md h3 { margin:10px 0 6px; color:#e6e6e6; }
+  .md p { margin:6px 0; }
+  .md pre { background:#0d0f12; border:1px solid #2a2e36; border-radius:8px;
+    padding:10px; overflow-x:auto; margin:8px 0; position:relative; }
+  .md pre code { font-family:Consolas,monospace; font-size:12px; color:#c8e1ff; }
+  .md code.inline { background:#22262d; border-radius:4px; padding:1px 5px;
+    font-family:Consolas,monospace; color:#c8e1ff; }
+  .md ul,.md ol { margin:6px 0 6px 20px; }
+  .md li { margin:2px 0; }
+  .copy-btn { position:absolute; top:6px; right:6px; background:#22262d;
+    color:#8e9aa8; border:1px solid #2a2e36; border-radius:4px;
+    font-size:11px; padding:2px 8px; cursor:pointer; }
+  .copy-btn:hover { color:#4fc3f7; border-color:#4fc3f7; }
+  details.tool-details { align-self:flex-start; max-width:85%;
+    border:1px solid #2a2e36; border-radius:8px; overflow:hidden; }
+  details.tool-details summary { padding:6px 10px; cursor:pointer;
+    font-size:12px; font-family:Consolas,monospace; color:#9aa4b0;
+    list-style:none; background:#1b1e24; }
+  details.tool-details summary .ok { color:#66bb6a; }
+  details.tool-details summary .fail { color:#ef5350; }
+  details.tool-details .body { padding:8px 10px; background:#0d0f12;
+    font-family:Consolas,monospace; font-size:12px; color:#c8e1ff;
+    max-height:240px; overflow:auto; white-space:pre-wrap; }
+  #footer { padding:6px 16px; border-top:1px solid #2a2e36;
+    font-size:11px; color:#555e6a; display:flex; gap:16px; }
 </style>
 </head>
 <body>
@@ -72,6 +97,12 @@
   </header>
   <div id="feed"></div>
   <div id="palette"></div>
+  <div id="footer">
+    <span id="f-tokens">tokens: 0</span>
+    <span id="f-steps">steps: 0</span>
+    <span id="f-mode"></span>
+    <span id="f-copy">© Coder-Agent（自研，零框架）</span>
+  </div>
   <form id="form">
     <input type="text" id="task" placeholder="输入编程任务（Enter 发送）…" autocomplete="off">
     <button type="submit" class="primary" id="send">运行</button>
@@ -80,6 +111,53 @@
 </main>
 <script>
 const feed = document.getElementById("feed");
+const footerTokens = document.getElementById("f-tokens");
+const footerSteps = document.getElementById("f-steps");
+
+/* ── Mini-Markdown 渲染（离线，无 CDN 依赖）── */
+function escHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function renderMarkdown(md) {
+  const blocks = md.split(/
+```/);
+  let html = "";
+  const codeStore = [];
+  blocks.forEach((blk, bi) => {
+    if (bi % 2 === 1) {  // 代码块（``` 之后到下一个 ```）
+      const nl = blk.indexOf("
+");
+      const body = nl >= 0 ? blk.slice(nl + 1) : blk;
+      const id = "code_" + codeStore.length;
+      codeStore.push(body.replace(/
+$/, ""));
+      html += '<pre><code>' + escHtml(body.replace(/
+$/, "")) +
+              '</code><button class="copy-btn" data-code="' + id + '">复制</button></pre>';
+      return;
+    }
+    let seg = escHtml(blk);
+    seg = seg.replace(/`([^`
+]+)`/g, '<code class="inline">$1</code>');
+    seg = seg.replace(/^###\s?(.+)$/gm, "<h3>$1</h3>");
+    seg = seg.replace(/^##\s?(.+)$/gm, "<h2>$1</h2>");
+    seg = seg.replace(/^#\s?(.+)$/gm, "<h1>$1</h1>");
+    seg = seg.replace(/^\s?[-*]\s+(.+)$/gm, "<li>$1</li>");
+    seg = seg.replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, "<ul>$1</ul>");
+    seg = seg.replace(/^\s?(\d+)\.\s+(.+)$/gm, "<li>$2</li>");
+    seg = seg.replace(/\*\*([^*
+]+)\*\*/g, "<b>$1</b>");
+    html += "<div class='md'>" + seg + "</div>";
+  });
+  const wrap = document.createElement("div");
+  wrap.innerHTML = html;
+  wrap.querySelectorAll(".copy-btn").forEach(btn => {
+    btn.onclick = () => {
+      const code = codeStore[+btn.dataset.code.slice(5)] || "";
+      navigator.clipboard.writeText(code);
+      btn.textContent = "已复制"; setTimeout(() => btn.textContent = "复制", 1200);
+    };
+  });
+  return wrap;
+}
 const stateEl = document.getElementById("state");
 let running = false;
 
@@ -198,6 +276,7 @@ function setRunning(v) {
   stateEl.textContent = v ? "运行中…" : "空闲";
   document.getElementById("stop").style.display = v ? "inline-block" : "none";
   document.getElementById("send").disabled = v;
+  document.getElementById("f-mode").textContent = "mode: " + document.getElementById("mode").value;
 }
 
 /* ── 斜杠命令面板（对标 Claude Code）── */
@@ -281,10 +360,28 @@ async function listenEvents() {
   es.onmessage = (e) => {
     const ev = JSON.parse(e.data);
     if (ev.kind === "text") add("think", "│ " + ev.text);
-    else if (ev.kind === "tool") add("tool" + (ev.success ? "" : " fail"),
-      "step " + ev.step + (ev.success ? " ✓ " : " ✗ ") + ev.tool + (ev.detail ? "  " + ev.detail : ""));
-    else if (ev.kind === "turn") add("turn", "── turn " + ev.step + " ──");
-    else if (ev.kind === "answer") add("answer", ev.answer);
+    else if (ev.kind === "tool") {
+      const det = document.createElement("details");
+      det.className = "tool-details";
+      const status = ev.success ? '<span class="ok">✓</span>' : '<span class="fail">✗</span>';
+      det.innerHTML = "<summary>" + status + " step " + ev.step + "  " +
+        escHtml(ev.tool) + (ev.target ? "  <b>" + escHtml(ev.target) + "</b>" : "") + "</summary>" +
+        '<div class="body">' + escHtml(ev.detail ? ("error: " + ev.detail + "
+") : "") +
+        (ev.preview || "(无输出)") + "</div>";
+      feed.appendChild(det); feed.scrollTop = feed.scrollHeight;
+    }
+    else if (ev.kind === "turn") {
+      add("turn", "── turn " + ev.step + " ──");
+      footerTokens.textContent = "tokens: " + (ev.tokens || 0);
+      footerSteps.textContent = "steps: " + ev.step;
+    }
+    else if (ev.kind === "answer") {
+      const div = document.createElement("div");
+      div.className = "answer";
+      div.appendChild(renderMarkdown(ev.answer));
+      feed.appendChild(div); feed.scrollTop = feed.scrollHeight;
+    }
     else if (ev.kind === "error") add("error", ev.error);
     else if (ev.kind === "status") add("turn", ev.message);
     else if (ev.kind === "done") { es.close(); setRunning(false); loadSessions(); }
