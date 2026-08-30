@@ -714,6 +714,7 @@ function onEvent(ev, tab) {
     clearPending(tab);
     appendToolToTurn(tab, ev);
     trackTool(tab, ev);
+    refreshActivity();
   } else if (ev.kind === "turn") {
     finalizeStream(tab);
     clearPending(tab);
@@ -724,6 +725,7 @@ function onEvent(ev, tab) {
       document.getElementById("f-tokens").textContent = tab.stats.tokens;
       document.getElementById("f-steps").textContent = tab.stats.steps;
     }
+    refreshActivity();
   } else if (ev.kind === "answer") {
     finalizeStream(tab);
     clearPending(tab);
@@ -752,6 +754,9 @@ function onEvent(ev, tab) {
     clearPending(tab);
     setRunning(tab, false);
     loadSessions();
+    if (document.getElementById("activityPanel").classList.contains("show")) {
+      renderActivity();  // 运行结束最终刷新统计
+    }
   }
 }
 
@@ -1629,11 +1634,25 @@ async function execLine(line) {
 }
 
 /* ═══════════ 活动面板 ═══════════ */
+let activityThrottle = 0;
+function refreshActivity() {
+  // 运行中实时刷新（500ms 节流，避免 stream 高频触发）
+  if (!document.getElementById("activityPanel").classList.contains("show")) return;
+  const now = Date.now();
+  if (now - activityThrottle < 500) return;
+  activityThrottle = now;
+  renderActivity();
+}
 function renderActivity() {
   const body = document.getElementById("activityBody");
   const tab = activeTab();
   const st = tab ? tab.stats : { tokens: 0, steps: 0, tools: {}, writes: [], reads: [] };
   const toolEntries = Object.entries(st.tools).sort((a, b) => b[1] - a[1]);
+  // 无数据时显示引导文案，而非全 0 表格
+  if (!st.steps && !toolEntries.length && !st.writes.length && !st.reads.length) {
+    body.innerHTML = '<div class="act-empty">📊 暂无数据<br><br>在下方输入任务运行后，<br>这里会实时显示 tokens / 步骤 / 工具调用 / 文件改动统计</div>';
+    return;
+  }
   const maxCnt = toolEntries.length ? toolEntries[0][1] : 1;
   let html = "";
   html += "<div class='act-section'><div class='as-title'>运行统计</div><div class='act-stats'>" +

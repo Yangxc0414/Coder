@@ -245,12 +245,23 @@ class RunManager:
                 self._emit(run_id, "turn", step=e.data.get("step"),
                            tokens=agent._tokens_used)
 
+            def on_turn(e):
+                last_turn_step[0] = e.data.get("step")
+                self._emit(run_id, "turn", step=e.data.get("step"),
+                           tokens=agent._tokens_used)
+
+            last_turn_step: list = [None]
             agent.hooks.register("ASSISTANT_TEXT", on_text)
             agent.hooks.register("POST_TOOL_USE", on_tool)
             agent.hooks.register("TURN_STOPPED", on_turn)
 
             answer = agent.run(task)
             session.final_answer = answer
+            # 纯回答任务（无工具调用）不会触发 TURN_STOPPED：
+            # 补发 turn 事件，保证前端 steps/tokens 统计有数据
+            if last_turn_step[0] != agent._n_steps:
+                self._emit(run_id, "turn", step=agent._n_steps,
+                           tokens=agent._tokens_used)
             self._emit(run_id, "answer", answer=answer)
         except Exception as e:
             session.error = f"{type(e).__name__}: {e}"

@@ -101,12 +101,13 @@ class LLMClient:
             finish_reason: str | None = None
             usage: dict[str, int] | None = None
             for chunk in stream:
+                # usage 可能出现在任何 chunk（部分 API 在带 choices 的末块）
+                if getattr(chunk, "usage", None) is not None:
+                    usage = {
+                        "prompt_tokens": chunk.usage.prompt_tokens,
+                        "completion_tokens": chunk.usage.completion_tokens,
+                    }
                 if not chunk.choices:
-                    if getattr(chunk, "usage", None):
-                        usage = {
-                            "prompt_tokens": chunk.usage.prompt_tokens,
-                            "completion_tokens": chunk.usage.completion_tokens,
-                        }
                     continue
                 choice = chunk.choices[0]
                 if choice.finish_reason:
