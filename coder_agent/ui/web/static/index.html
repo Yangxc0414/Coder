@@ -462,7 +462,7 @@ function createTab(title) {
     id, title: title || "新会话",
     runId: null, es: null, running: false,
     turnEl: null, turnStep: null, streamEl: null, pendingEl: null,
-    stateInfo: null,
+    stateInfo: null, endedShown: false,
     stats: { tokens: 0, steps: 0, tools: {}, writes: [], reads: [] },
     viewingHistory: false, sessionFile: null, sessionData: null, sessionStats: null,
     histTurns: null, histRendered: 0,
@@ -941,6 +941,7 @@ function onEvent(ev, tab) {
     scrollFeedEl(tab.feedEl, true);
   } else if (ev.kind === "ended") {
     const reason = ev.reason || "完成";
+    tab.endedShown = true;
     const div = document.createElement("div");
     div.className = "turn";
     div.textContent = "■ 运行结束（" + (ev.steps || "?") + " 步，" + reason + "）";
@@ -952,6 +953,13 @@ function onEvent(ev, tab) {
     finalizeStream(tab);
     clearPending(tab);
     setRunning(tab, false);
+    if (!tab.endedShown) {
+      const div = document.createElement("div");
+      div.className = "turn";
+      div.textContent = "✅ 运行完成" + (tab.stats.steps ? "（共 " + tab.stats.steps + " 步）" : "");
+      tab.feedEl.appendChild(div);
+      scrollFeedEl(tab.feedEl, true);
+    }
     loadSessions();
     if (document.getElementById("activityPanel").classList.contains("show")) {
       renderActivity();  // 运行结束最终刷新统计
