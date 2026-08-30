@@ -885,11 +885,39 @@ function appendVerifierCard(tab, ev) {
   det.className = "tool-details";
   det.open = true;
   const mark = ev.passed ? '<span class="ok">✅</span>' : '<span class="fail">❌</span>';
+  const statusTxt = ev.passed ? " 目标达成检查通过" :
+    (ev.accept_reason ? " 未通过但接受" : " 未通过 → 注入修复指令继续");
   det.innerHTML = "<summary>" + mark +
-    " <span class='tool-name'>Verifier 校验</span>" +
-    (ev.passed ? " 通过" : " 未通过 → 注入修复指令") +
-    "</summary><div class='body'><span class='res-label'>校验结果</span>\n" +
-    escHtml(ev.summary || "(无摘要)") + "</div>";
+    " <span class='tool-name'>Verifier 目标达成检查</span>" + statusTxt +
+    "</summary><div class='body'>";
+  const sb = det.querySelector(".body");
+  // 各检查项明细（框架真实检查：pytest / 语法 / git）
+  const results = ev.results || [];
+  if (results.length) {
+    const rl = document.createElement("div");
+    rl.className = "res-label";
+    rl.textContent = "检查项";
+    sb.appendChild(rl);
+    results.forEach(r => {
+      const row = document.createElement("div");
+      row.textContent = (r.passed ? "✅ " : "❌ ") + r.name + " — " + (r.message || "");
+      row.style.cssText = "margin:2px 0;";
+      sb.appendChild(row);
+    });
+  }
+  if (ev.accept_reason) {
+    const ar = document.createElement("div");
+    ar.className = "err-label";
+    ar.textContent = "⚠️ " + ev.accept_reason;
+    sb.appendChild(ar);
+  }
+  if (ev.summary) {
+    const sl = document.createElement("div");
+    sl.className = "res-label";
+    sl.textContent = "摘要";
+    sb.appendChild(sl);
+    sb.appendChild(document.createTextNode(ev.summary));
+  }
   body.appendChild(det);
   scrollFeedEl(tab.feedEl, nearBottom(tab.feedEl));
 }

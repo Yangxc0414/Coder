@@ -366,14 +366,7 @@ class Agent:
                     # 50-step flail.
                     if self._verifier:
                         passed, summary = self._verifier.check()
-                        self.hooks.fire(VERIFIER_RESULT.with_data(
-                            passed=passed, summary=summary[:300],
-                            step=self._n_steps))
-                        self.trace.record(
-                            self._n_steps, "verification",
-                            passed=passed,
-                            summary=summary[:200],
-                        )
+                        accept_reason = None
                         if not passed:
                             snapshot = self._n_mutations
                             if snapshot == self._verify_snapshot:
@@ -385,6 +378,7 @@ class Agent:
                                     self._n_steps, "verification_accept",
                                     reason="no mutations since last failed check",
                                 )
+                                accept_reason = "无新变更——接受答案（失败为预存问题，不归本任务）"
                             else:
                                 self._verify_snapshot = snapshot
                                 logger.warning("Verification failed, injecting prompt")
@@ -392,7 +386,23 @@ class Agent:
                                     "role": "user",
                                     "content": f"Verification failed:\n{summary}\nPlease fix the issues and try again."
                                 })
-                                continue
+                        # 携带检查项明细与接受原因（前端完整呈现达成判断）
+                        self.hooks.fire(VERIFIER_RESULT.with_data(
+                            passed=passed, summary=summary[:300],
+                            step=self._n_steps,
+                            accept_reason=accept_reason,
+                            results=[
+                                {"name": r.name, "passed": r.passed,
+                                 "message": str(r.message)[:80]}
+                                for r in getattr(self._verifier, "_results", [])
+                            ]))
+                        self.trace.record(
+                            self._n_steps, "verification",
+                            passed=passed,
+                            summary=summary[:200],
+                        )
+                        if not passed and accept_reason is None:
+                            continue
 
                     # LLM verifier: select best candidate (select/full modes)
                     if self._llm_verifier_mode in ("select", "full") and len(self._candidate_answers) >= 2:

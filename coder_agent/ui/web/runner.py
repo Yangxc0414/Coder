@@ -315,7 +315,9 @@ class RunManager:
             def on_verifier(e):
                 self._emit(run_id, "verifier", passed=bool(e.data.get("passed")),
                            summary=str(e.data.get("summary") or "")[:400],
-                           step=e.data.get("step"))
+                           step=e.data.get("step"),
+                           accept_reason=str(e.data.get("accept_reason") or ""),
+                           results=e.data.get("results") or [])
 
             def on_fw_event(kind):
                 def cb(e):
