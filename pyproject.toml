@@ -17,11 +17,13 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.4.0"]
 ui = ["rich>=13.0", "prompt_toolkit>=3.0"]
+web = ["fastapi>=0.110", "uvicorn>=0.29"]
 verifier = ["llm-verifier>=0.2.0"]
 
 [project.scripts]
 coder = "coder_agent.main:main"
 coder-repl = "coder_agent.ui.cli.repl:main"
+coder-web = "coder_agent.ui.web.server:main"
 
 [tool.ruff]
 line-length = 100

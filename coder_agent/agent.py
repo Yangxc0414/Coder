@@ -129,6 +129,7 @@ class Agent:
         self._n_steps = 0
         self._n_format_errors = 0
         self._n_mutations = 0
+        self._abort_requested = False
         # Command-failure adaptation (real-run finding: 13 consecutive
         # failures with the same wrong approach — e.g. `python3` on Windows)
         self._cmd_fail_streak = 0
@@ -178,6 +179,14 @@ class Agent:
             memory_tool.load_from_disk()
             self.registry.register(memory_tool)
 
+    def request_abort(self) -> None:
+        """Request cooperative cancellation at the next step boundary.
+
+        Thread-safe by design: a UI (e.g. web client) runs the agent in a
+        worker thread and calls this from the UI thread to press "Stop".
+        """
+        self._abort_requested = True
+
     def _append_message(self, message: dict[str, Any]) -> None:
         """Single funnel for conversation mutation — keeps the session
         journal complete without instrumenting every call site."""
@@ -207,6 +216,7 @@ class Agent:
         self._candidate_answers = []
         self._llm_warned = False
         self._n_mutations = 0
+        self._abort_requested = False
         self._tokens_used = 0
         self._budget_notice_given = False
         self._length_escalated = False
@@ -241,6 +251,13 @@ class Agent:
                     logger.warning("Verifier baseline capture failed: %s", e)
 
         while self._n_steps < self._max_steps:
+            if self._abort_requested:
+                self.trace.record(self._n_steps, "aborted", step=self._n_steps)
+                logger.info("Aborted by user at step %d", self._n_steps)
+                self.hooks.fire(AGENT_ENDED.with_data(
+                    steps=self._n_steps, reason="aborted"))
+                return "(已按用户要求停止——进度已保存，可用 /resume 继续)"
+
             self._n_steps += 1
             logger.info("=== Step %d ===", self._n_steps)
 
