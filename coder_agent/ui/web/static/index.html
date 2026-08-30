@@ -462,6 +462,7 @@ function createTab(title) {
     id, title: title || "新会话",
     runId: null, es: null, running: false,
     turnEl: null, turnStep: null, streamEl: null, pendingEl: null,
+    stateInfo: null,
     stats: { tokens: 0, steps: 0, tools: {}, writes: [], reads: [] },
     viewingHistory: false, sessionFile: null, sessionData: null, sessionStats: null,
     histTurns: null, histRendered: 0,
@@ -502,7 +503,8 @@ function switchTab(id) {
   document.getElementById("stop").style.display = tab.running ? "inline-block" : "none";
   document.getElementById("send").disabled = tab.running;
   document.getElementById("f-tokens").textContent = tab.stats.tokens;
-  document.getElementById("f-steps").textContent = tab.stats.steps;
+  document.getElementById("f-steps").textContent =
+    tab.stateInfo ? tab.stateInfo.step + "/" + (tab.stateInfo.max_steps || 50) : tab.stats.steps;
   document.getElementById("historyBar").style.display = tab.viewingHistory ? "flex" : "none";
   if (tab.viewingHistory && tab.sessionData) {
     document.getElementById("histTitle").textContent = "📜 " + (tab.sessionData.task || "历史会话");
@@ -581,6 +583,13 @@ const SUGGESTS = [
   "给项目根目录写一个简洁的 README.md",
   "检查代码中是否有明显的 bug 并修复",
 ];
+// 与框架 MODE_DESCRIPTIONS 严格对应（coder_agent/mode.py）
+const MODES = [
+  { name: "goal", desc: "目标驱动：规划并执行以完成任务" },
+  { name: "plan", desc: "只规划：分析代码库并输出执行计划（只读）" },
+  { name: "dry-run", desc: "预演：展示将改动什么，不修改文件" },
+  { name: "full", desc: "完全访问：绕过策略拦截（路径安全仍强制）" },
+];
 function renderWelcome(tab) {
   if (tab.feedEl.children.length) return;
   const w = document.createElement("div");
@@ -595,6 +604,10 @@ function renderWelcome(tab) {
     '<div class="suggest-label">试一试：</div>' +
     '<div class="suggest-chips">' + SUGGESTS.map(s =>
       '<button class="chip" data-s="' + escHtml(s) + '">' + escHtml(s) + '</button>'
+    ).join("") + '</div>' +
+    '<div class="suggest-label">执行模式（与框架一致）：</div>' +
+    '<div class="suggest-chips">' + MODES.map(m =>
+      '<span class="chip" title="' + escHtml(m.desc) + '" style="cursor:default;">' + m.name + '</span>'
     ).join("") + '</div>' +
     '<div class="shortcut-hint">' +
     "<b>Enter</b> 发送 &nbsp; <b>/</b> 命令面板 &nbsp; <b>Ctrl+T</b> 新会话 &nbsp; <b>Ctrl+Tab</b> 切换 &nbsp; <b>Ctrl+W</b> 关闭 &nbsp; <b>Ctrl+L</b> 主题" +
@@ -846,7 +859,14 @@ function onEvent(ev, tab) {
     tab.stats.steps = ev.step;
     if (Tabs.active && Tabs.active.id === tab.id) {
       document.getElementById("f-tokens").textContent = tab.stats.tokens;
-      document.getElementById("f-steps").textContent = tab.stats.steps;
+    }
+    refreshActivity();
+  } else if (ev.kind === "state") {
+    // AgentState + Memory 摘要（框架状态严格对应）
+    tab.stateInfo = ev;
+    if (Tabs.active && Tabs.active.id === tab.id) {
+      document.getElementById("f-steps").textContent =
+        ev.step + "/" + (ev.max_steps || 50);
     }
     refreshActivity();
   } else if (ev.kind === "answer") {
@@ -1903,6 +1923,27 @@ function renderActivity() {
     "<br>📊 当前估算占用: " + (used ? used.toLocaleString() : "0") + " (" + pct + "%)" +
     (pct >= 80 ? "<br>⚠️ 接近预算，即将压缩旧消息" : "") +
     "</div></div>";
+  // Agent 状态（AgentState，严格对应框架 to_status_prompt 字段）
+  const si = tab ? tab.stateInfo : null;
+  if (si) {
+    const stepPct = Math.min(100, Math.round((si.step || 0) / (si.max_steps || 50) * 100));
+    html += "<div class='act-section'><div class='as-title'>Agent 状态</div>" +
+      "<div class='act-goal'>⚙ Step " + (si.step || 0) + "/" + (si.max_steps || 50) +
+      "<div class='tbar' style='margin:6px 0;'><i style='width:" + stepPct + "%;background:var(--accent2);'></i></div>" +
+      (si.goal ? "🎯 Goal: " + escHtml(si.goal) + "<br>" : "") +
+      (si.editing ? "✏️ 正在编辑: " + escHtml(si.editing) + "<br>" : "") +
+      ((si.modified || []).length ? "🔧 已修改: " + escHtml(si.modified.join(", ")) + "<br>" : "") +
+      ((si.reads || []).length ? "👁 已读取: " + escHtml(si.reads.join(", ")) + "<br>" : "") +
+      (si.subgoals ? "✅ 完成子目标: " + si.subgoals + " 个<br>" : "") +
+      "</div></div>";
+  }
+  // Memory 记忆（框架 Memory.long_term 键）
+  if (tab && tab.stateInfo && (tab.stateInfo.memory_keys || []).length) {
+    html += "<div class='act-section'><div class='as-title'>🧠 记忆（Memory）</div>" +
+      "<div class='act-goal'>" + tab.stateInfo.memory_keys.map(k =>
+        "<b style='color:var(--accent);'>" + escHtml(k) + "</b>").join(" · ") +
+      "</div></div>";
+  }
   html += "<div class='act-section'><div class='as-title'>当前配置</div>" +
     "<div class='act-goal'>🤖 " + escHtml(document.getElementById("model").value) +
     "<br>⚙ " + escHtml(document.getElementById("mode").value) +

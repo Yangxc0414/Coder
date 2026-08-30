@@ -291,6 +291,19 @@ class RunManager:
                 last_turn_step[0] = e.data.get("step")
                 self._emit(run_id, "turn", step=e.data.get("step"),
                            tokens=agent._tokens_used)
+                # 每步附带 AgentState + Memory 摘要（严格对应框架状态）
+                st = agent.state
+                mem = agent.memory
+                self._emit(run_id, "state",
+                           step=int(getattr(st, "step", 0) or 0),
+                           max_steps=int(getattr(agent, "_max_steps", 50)),
+                           goal=str(getattr(st, "task_goal", "") or ""),
+                           editing=str(getattr(st, "current_file", "") or ""),
+                           modified=list(getattr(st, "modified_files", []) or [])[-5:],
+                           reads=sorted(getattr(st, "read_files", set()) or set())[-5:],
+                           subgoals=len(getattr(st, "completed_subgoals", []) or []),
+                           memory_keys=list(getattr(mem, "long_term", {}) or {}),
+                           )
                 # 检测上下文压缩是否发生（三层压缩展示）
                 comp = getattr(getattr(agent, "context", None),
                                "last_compression", None)
