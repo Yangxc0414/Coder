@@ -174,6 +174,41 @@ def api_models():
         return {"models": []}
 
 
+@app.get("/api/file")
+def api_file(path: str):
+    """只读查看工作区内文件（commonpath 防逃逸；大文件截断）。"""
+    from coder_agent.tools.filesystem import _resolve_within
+
+    m = get_manager()
+    try:
+        resolved = _resolve_within(m.workspace, path)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    if not resolved.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在或为目录")
+    content = resolved.read_text(encoding="utf-8", errors="replace")
+    truncated = len(content) > 60_000
+    return {"path": str(resolved), "content": content[:60_000],
+            "truncated": truncated, "size": len(content)}
+
+
+@app.get("/api/files")
+def api_files(path: str = ""):
+    """列出工作区内某目录的一层文件（供文件树；防逃逸）。"""
+    from coder_agent.tools.filesystem import _resolve_within
+
+    m = get_manager()
+    try:
+        target = _resolve_within(m.workspace, path or ".")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    if not target.is_dir():
+        raise HTTPException(status_code=404, detail="不是目录")
+    files = [f.name for f in sorted(target.iterdir())
+             if f.is_file() and not f.name.startswith(".")]
+    return {"files": files, "dir": str(target)}
+
+
 @app.get("/api/status")
 def api_status():
     m = get_manager()

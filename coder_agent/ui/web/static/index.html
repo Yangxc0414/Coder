@@ -67,9 +67,19 @@
 <body>
 <aside>
   <h1>📋 Coder-Agent</h1>
-  <div style="font-size:12px;color:#8e9aa8;">会话（最新在前，点击恢复）</div>
-  <div id="sessions" style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;"></div>
-  <button class="session" onclick="loadSessions()">↻ 刷新</button>
+  <div style="display:flex; gap:6px; margin-bottom:6px;">
+    <button class="session" id="tab-sessions" style="flex:1;" onclick="showTab('sessions')">会话</button>
+    <button class="session" id="tab-files" style="flex:1;" onclick="showTab('files')">文件</button>
+  </div>
+  <div id="pane-sessions" style="display:flex;flex-direction:column;gap:10px;flex:1;overflow-y:auto;">
+    <div style="font-size:12px;color:#8e9aa8;">会话（最新在前，点击恢复）</div>
+    <div id="sessions" style="display:flex;flex-direction:column;gap:6px;"></div>
+    <button class="session" onclick="loadSessions()">↻ 刷新</button>
+  </div>
+  <div id="pane-files" style="display:none;flex-direction:column;gap:6px;flex:1;overflow-y:auto;">
+    <button class="session" onclick="loadFiles()">↻ 刷新文件树</button>
+    <div id="filetree" style="display:flex;flex-direction:column;gap:2px;"></div>
+  </div>
 </aside>
 <main>
   <header>
@@ -82,6 +92,17 @@
     <span id="ws" style="font-size:12px;color:#8e9aa8;"></span>
     <span id="state" style="font-size:12px;color:#8e9aa8;">空闲</span>
 
+  <div id="fileModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:60;">
+    <div style="background:#1b1e24; border:1px solid #2a2e36; border-radius:10px;
+      width:80%; height:80%; margin:40px auto; padding:14px; display:flex; flex-direction:column;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <b id="fileTitle" style="word-break:break-all; font-size:13px;"></b>
+        <button onclick="closeFileViewer()" style="background:none;color:#8e9aa8;border:none;cursor:pointer;">✕</button>
+      </div>
+      <pre id="fileBody" style="flex:1; overflow:auto; background:#0d0f12; border-radius:8px;
+        padding:12px; font-family:Consolas,monospace; font-size:12px; color:#c8e1ff; white-space:pre-wrap;"></pre>
+    </div>
+  </div>
   <div id="folderModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50;">
     <div style="background:#1b1e24; border:1px solid #2a2e36; border-radius:10px; width:520px; margin:80px auto; padding:16px;">
       <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
@@ -447,6 +468,56 @@ async function loadWorkspace() {
   const r = await (await fetch("/api/workspace")).json();
   document.getElementById("ws").textContent = "工作区: " + r.workspace;
 }
+
+function showTab(tab) {
+  document.getElementById("pane-sessions").style.display = tab === "sessions" ? "flex" : "none";
+  document.getElementById("pane-files").style.display = tab === "files" ? "flex" : "none";
+  document.getElementById("tab-sessions").style.borderColor =
+    tab === "sessions" ? "#4fc3f7" : "#2a2e36";
+  document.getElementById("tab-files").style.borderColor =
+    tab === "files" ? "#4fc3f7" : "#2a2e36";
+  if (tab === "files") loadFiles();
+}
+
+async function loadFiles(dir) {
+  const tree = document.getElementById("filetree");
+  tree.innerHTML = '<div style="color:#555e6a;font-size:12px;">加载中…</div>';
+  const ws = (await (await fetch("/api/workspace")).json()).workspace;
+  const data = await (await fetch("/api/fs/browse?path=" + encodeURIComponent(dir || ws))).json();
+  tree.innerHTML = "";
+  if (data.parent !== null && !data.drives) {
+    const up = document.createElement("button");
+    up.className = "session"; up.textContent = "↰ ..";
+    up.onclick = () => loadFiles(data.parent);
+    tree.appendChild(up);
+  }
+  data.dirs.forEach(d => {
+    const b = document.createElement("button");
+    b.className = "session"; b.textContent = "📁 " + d.split(/[\/]/).pop();
+    b.onclick = () => loadFiles(d);
+    tree.appendChild(b);
+  });
+  // 工作区根目录下的文件（深度 1）通过 browse 拿不到文件，改用 files 端点
+  const fl = await (await fetch("/api/files?path=" + encodeURIComponent(dir || ws))).json();
+  fl.files.forEach(f => {
+    const b = document.createElement("button");
+    b.className = "session"; b.textContent = "📄 " + f;
+    b.onclick = () => viewFile(f);
+    tree.appendChild(b);
+  });
+}
+
+async function viewFile(path) {
+  const r = await fetch("/api/file?path=" + encodeURIComponent(path));
+  if (!r.ok) { const e = await r.json().catch(() => ({})); add("error", e.detail || "无法查看"); return; }
+  const d = await r.json();
+  document.getElementById("fileTitle").textContent = d.path + "  (" + d.size + " 字符)";
+  document.getElementById("fileBody").textContent =
+    d.content + (d.truncated ? "
+…[已截断]" : "");
+  document.getElementById("fileModal").style.display = "block";
+}
+function closeFileViewer() { document.getElementById("fileModal").style.display = "none"; }
 
 async function loadSessions() {
   const box = document.getElementById("sessions");

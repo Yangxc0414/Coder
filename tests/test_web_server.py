@@ -67,3 +67,26 @@ class TestBrowseEndpoint:
 
     def test_browse_missing_dir_404(self, client):
         assert client.get("/api/fs/browse", params={"path": "D:/no/such/xyz"}).status_code == 404
+
+
+class TestFilesEndpoints:
+    def test_files_lists_one_level(self, client, tmp_path: Path):
+        web_server._state["manager"] = web_server.RunManager(tmp_path)
+        (tmp_path / "a.py").write_text("x")
+        (tmp_path / "sub").mkdir()
+        (tmp_path / ".hidden").write_text("h")
+        r = client.get("/api/files", params={"path": str(tmp_path)})
+        files = r.json()["files"]
+        assert "a.py" in files and "sub" not in files and ".hidden" not in files
+
+    def test_file_read_with_containment(self, client, tmp_path: Path):
+        web_server._state["manager"] = web_server.RunManager(tmp_path)
+        (tmp_path / "a.py").write_text("print('hi')")
+        ok = client.get("/api/file", params={"path": str(tmp_path / "a.py")})
+        assert "print" in ok.json()["content"]
+        bad = client.get("/api/file", params={"path": str(tmp_path.parent / "outside.txt")})
+        assert bad.status_code == 403
+
+    def test_file_missing_404(self, client, tmp_path: Path):
+        web_server._state["manager"] = web_server.RunManager(tmp_path)
+        assert client.get("/api/file", params={"path": str(tmp_path / "no.txt")}).status_code == 404
