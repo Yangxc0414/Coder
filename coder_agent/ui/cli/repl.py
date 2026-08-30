@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 import sys
 import time
@@ -62,6 +63,7 @@ class CliState:
     messages: list[dict] = None  # type: ignore[assignment]
     steps: int = 0
     last_answer: str = ""
+    goal: str = ""
 
     def __post_init__(self):
         if self.messages is None:
@@ -102,6 +104,8 @@ class CoderRepl:
         self._console = Console()
         self._agent: Agent | None = None
         self._session_id: int = 0
+        self._model_choices: list[str] = []
+        self._session_choices: list[Path] = []
 
     def _build_agent(self, task: str, journal=None) -> Agent:
         """Build a fresh Agent for a task."""
@@ -125,6 +129,21 @@ class CoderRepl:
             token_budget=self.token_budget,
         )
         return agent
+
+    def _fetch_api_models(self) -> list[str]:
+        """从 OpenAI 兼容网关拉取可用模型列表（失败返回空，不阻塞）。"""
+        import urllib.request
+
+        base = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+        key = os.getenv("OPENAI_API_KEY") or ""
+        try:
+            req = urllib.request.Request(
+                f"{base}/models", headers={"Authorization": f"Bearer {key}"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+            return sorted(str(m.get("id")) for m in data.get("data", []) if m.get("id"))
+        except Exception:
+            return []
 
     def _next_session_path(self) -> Path:
         session_dir = Path.home() / ".coder_sessions"
@@ -157,6 +176,8 @@ class CoderRepl:
             self._console.print(
                 "  [dim]ℹ 以上为原始历史累计；LLM 实际收到的是自动压缩后的视图[/dim]")
         self._console.print(f"  Mode:        {self.state.mode.value}")
+        if self.state.goal:
+            self._console.print(f"  Goal:        {self.state.goal[:60]}")
         self._console.print(f"  Steps:       {self.state.steps}")
         if self.state.trace_recorder.get_entries():
             metrics = self.state.trace_recorder.get_metrics()
@@ -174,6 +195,7 @@ class CoderRepl:
   [cyan]/sessions[/cyan]       List journaled sessions
   [cyan]/mode <name>[/cyan]     Switch mode: goal / plan / dry-run / full (next /run)
   [cyan]/model <name>[/cyan]    Switch model (next /run)
+  [cyan]/goal <text>[/cyan]     Set session goal (injected into every /run)
   [cyan]/status[/cyan]          Show context status
   [cyan]/tools[/cyan]           List tools available to the model
   [cyan]/compact[/cyan]         Compact last-run history (runs auto-compact anyway)
@@ -260,31 +282,68 @@ class CoderRepl:
                 self._run_task(arg)
         elif cmd == "/model":
             if not arg:
-                self._console.print(
-                    f"[yellow]Current model:[/yellow] {self.model}  "
-                    "[dim]Usage: /model <name>（对下一次 /run 生效）[/dim]")
+                self._console.print(f"[yellow]Current model:[/yellow] {self.model}")
+                models = self._fetch_api_models()
+                if models:
+                    self._model_choices = models
+                    for i, m in enumerate(models, 1):
+                        mark = "  <-" if m == self.model else ""
+                        self._console.print(f"  [{i}] {m}{mark}")
+                    self._console.print(
+                        "[dim]选择: /model <序号> 或 /model <名称>（下次 /run 生效）[/dim]")
+                else:
+                    self._console.print(
+                        "[dim]在线模型列表不可用，直接 /model <名称>[/dim]")
+            elif arg.isdigit() and self._model_choices:
+                idx = int(arg)
+                if 1 <= idx <= len(self._model_choices):
+                    self.model = self._model_choices[idx - 1]
+                    self._console.print(f"[green]✓ Model switched to: {self.model}[/green]")
+                else:
+                    self._console.print(f"[red]序号超出范围 1-{len(self._model_choices)}[/red]")
             else:
                 self.model = arg.strip()
                 self._console.print(f"[green]✓ Model switched to: {self.model}[/green] "
-                                    f"[dim]（下次 /run 生效）[/dim]")
+                                    f"[dim]（下次 /run 生效；名称无法本地验证）[/dim]")
         elif cmd == "/resume":
-            if not arg:
-                self._console.print("[red]Usage: /resume <journal.jsonl> [continuation instruction][/red]")
+            parts = arg.split(maxsplit=1) if arg else []
+            target = parts[0] if parts else ""
+            instruction = parts[1] if len(parts) > 1 else DEFAULT_RESUME_PROMPT
+            if not target:
+                files = self._list_sessions()
+                if not files:
+                    self._console.print("[red]没有可恢复的会话——先 /run 一次[/red]")
+                else:
+                    self._run_resumed(str(files[0]), instruction)
+            elif target.isdigit():
+                if not self._session_choices:
+                    self._list_sessions()
+                idx = int(target)
+                if 1 <= idx <= len(self._session_choices):
+                    self._run_resumed(str(self._session_choices[idx - 1]), instruction)
+                else:
+                    self._console.print(f"[red]序号超出范围 1-{len(self._session_choices)}（先 /sessions 查看）[/red]")
             else:
-                parts = arg.split(maxsplit=1)
-                path = parts[0]
-                instruction = parts[1] if len(parts) > 1 else DEFAULT_RESUME_PROMPT
-                self._run_resumed(path, instruction)
+                self._run_resumed(target, instruction)
         elif cmd == "/sessions":
-            session_dir = Path.home() / ".coder_sessions"
-            files = sorted(session_dir.glob("session_*.jsonl"), reverse=True) if session_dir.exists() else []
-            if not files:
-                self._console.print("[dim]No journaled sessions yet (they are created per /run).[/dim]")
+            self._list_sessions()
+        elif cmd == "/goal":
+            if not arg:
+                if self.state.goal:
+                    self._console.print(f"[yellow]Session goal:[/yellow] {self.state.goal}  "
+                                        "[dim]/goal <text> 修改；/goal clear 清除[/dim]")
+                else:
+                    self._console.print(
+                        "[dim]未设置会话目标。用法: /goal <text>——目标会注入后续每次 "
+                        "/run 的系统提示（State.Goal），子任务只管做什么。[/dim]")
+            elif arg.strip() == "clear":
+                self.state.goal = ""
+                self._console.print("[green]✓ Session goal cleared[/green]")
             else:
-                self._console.print("[bold]Journaled sessions (newest first):[/bold]")
-                for f in files[:10]:
-                    size = f.stat().st_size
-                    self._console.print(f"  {f}  ({size} bytes)  → /resume {f}")
+                self.state.goal = arg.strip()
+                self._console.print(
+                    f"[green]✓ Session goal set:[/green] {self.state.goal}  "
+                    "[dim]将注入后续每次 /run 的系统提示（Goal 字段）[/dim]")
         else:
             self._console.print(f"[red]Unknown command: {cmd}. Type /help for usage.[/red]")
         return True
@@ -296,6 +355,8 @@ class CoderRepl:
 
         journal = SessionJournal(self._next_session_path())
         agent = self._build_agent(task, journal=journal)
+        if self.state.goal:
+            agent.state.task_goal = self.state.goal  # 注入系统提示（State.Goal）
 
         try:
             self._execute_run(agent, task)
@@ -304,6 +365,29 @@ class CoderRepl:
         self._console.print(
             f"[dim]Session journaled: {journal.path} — use /resume {journal.path} to continue it later[/dim]"
         )
+
+    def _list_sessions(self) -> list[Path]:
+        """列出会话（新→旧），缓存序号供 /resume N 使用；打印富信息表。"""
+        session_dir = Path.home() / ".coder_sessions"
+        files = (sorted(session_dir.glob("session_*.jsonl"),
+                        key=lambda f: f.stat().st_mtime, reverse=True)
+                 if session_dir.exists() else [])
+        self._session_choices = files
+        if not files:
+            self._console.print("[dim]No journaled sessions yet (created per /run).[/dim]")
+            return []
+        self._console.print("[bold]Journaled sessions (newest first):[/bold]")
+        for i, f in enumerate(files[:10], 1):
+            ts = time.strftime("%m-%d %H:%M", time.localtime(f.stat().st_mtime))
+            try:
+                head = next((m.get("content", "")[:44] for m in
+                             load_journal(f)["messages"] if m.get("role") == "user"), "?")
+            except Exception:
+                head = "?"
+            mark = "  <-" if i == 1 else ""
+            self._console.print(f"  [{i}] {ts}  {head}{mark}")
+        self._console.print("[dim]Resume: /resume <序号> / /resume <文件>；/resume = 最新[/dim]")
+        return files
 
     def _resolve_journal_path(self, path: str) -> Path:
         """Resolve a /resume path: ~ expansion, and bare filenames are
@@ -335,6 +419,8 @@ class CoderRepl:
             if m.get("role") == "user":
                 agent.state.task_goal = (m.get("content") or "")[:200]
                 break
+        if self.state.goal:
+            agent.state.task_goal = self.state.goal
 
         self._console.print(
             f"[green]✓ Restored {len(restored['messages'])} messages from {path}[/green]"

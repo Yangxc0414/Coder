@@ -8,6 +8,11 @@ from coder_agent.agent import Agent
 from coder_agent.llm.client import LLMResponse
 from coder_agent.mode import AgentMode
 from coder_agent.tools.registry import ToolRegistry
+import os
+
+from coder_agent.journal import SessionJournal
+from coder_agent.memory import Memory
+from coder_agent.state import AgentState
 from coder_agent.ui.cli.repl import CoderRepl
 
 
@@ -71,3 +76,73 @@ class TestAssistantTextHook:
         agent.hooks.register("ASSISTANT_TEXT", lambda e: fired.append(e.data))
         agent.run("task")
         assert not fired  # 最终答案走答案面板，不走思考通道
+
+
+class TestGoalCommand:
+    """P-新增：/goal 会话目标——设置/清除/注入系统提示。"""
+
+    def test_set_and_show(self, tmp_path: Path):
+        repl = _repl(tmp_path)
+        repl._handle_command("/goal 完成博客整理")
+        assert repl.state.goal == "完成博客整理"
+
+    def test_clear(self, tmp_path: Path):
+        repl = _repl(tmp_path)
+        repl._handle_command("/goal x")
+        repl._handle_command("/goal clear")
+        assert repl.state.goal == ""
+
+    def test_goal_injected_into_status_prompt(self, tmp_path: Path):
+        """Goal 必须进入每步的系统提示注入（State.Goal）。"""
+        from coder_agent.agent import _build_system_prompt
+        from coder_agent.memory import Memory
+
+        repl = _repl(tmp_path)
+        repl._handle_command("/goal 完成博客整理")
+        state = AgentState(task_goal=repl.state.goal)
+        prompt = _build_system_prompt([], str(tmp_path), state=state, memory=Memory())
+        assert "Goal: 完成博客整理" in prompt
+
+
+class TestSessionPickers:
+    """P-新增：/sessions 序号 + /resume 无参=最新。"""
+
+    def test_sessions_lists_and_caches_choices(self, tmp_path: Path):
+        from coder_agent.journal import SessionJournal
+
+        repl = _repl(tmp_path)
+        s1 = tmp_path / "session_a.jsonl"
+        s2 = tmp_path / "session_b.jsonl"
+        for p, msg in ((s1, "older task"), (s2, "newer task")):
+            j = SessionJournal(p)
+            j.log_message({"role": "user", "content": msg})
+            j.close()
+        # _list_sessions 从固定目录扫描 → monkeypatch home
+        home = tmp_path / "home"
+        home.mkdir()
+        import coder_agent.ui.cli.repl as repl_mod
+        orig = repl_mod.Path.home
+        repl_mod.Path.home = staticmethod(lambda: home)
+        try:
+            import shutil
+            (home / ".coder_sessions").mkdir(parents=True)
+            shutil.copy(s1, home / ".coder_sessions" / "session_a.jsonl")
+            shutil.copy(s2, home / ".coder_sessions" / "session_b.jsonl")
+            os.utime(home / ".coder_sessions" / "session_a.jsonl", (1, 1))
+            files = repl._list_sessions()
+            assert files[0] == home / ".coder_sessions" / "session_b.jsonl"
+            assert repl._session_choices == files
+        finally:
+            repl_mod.Path.home = staticmethod(orig)
+
+    def test_resume_latest_resolves(self, tmp_path: Path, monkeypatch):
+        repl = _repl(tmp_path)
+        latest = tmp_path / "latest.jsonl"
+        j = SessionJournal(latest)
+        j.log_message({"role": "user", "content": "prior"})
+        j.close()
+        monkeypatch.setattr(repl, "_list_sessions", lambda: [latest])
+        monkeypatch.setattr(repl, "_run_resumed", lambda p, i: captured.update(path=p))
+        captured = {}
+        repl._handle_command("/resume")
+        assert captured["path"] == str(latest)

@@ -74,6 +74,9 @@ class AgentState:
         """Generate a status summary string for injection into System Prompt."""
         parts = [f"Step {self.step}/{self.max_steps}"]
 
+        if self.task_goal:
+            parts.append(f"Goal: {self.task_goal[:80]}")
+
         if self.current_file:
             parts.append(f"Editing: {self.current_file}")
 
