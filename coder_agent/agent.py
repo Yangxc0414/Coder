@@ -226,7 +226,10 @@ class Agent:
             self._append_message({"role": "user", "content": task})
         else:
             self._append_message({"role": "user", "content": task})
-            self.state.task_goal = task
+            # 会话目标优先：外部（REPL /goal / Web /goal）已注入 task_goal
+            # 时不覆盖；未注入时以当前任务作为目标（Goal 字段显示）
+            if not self.state.task_goal:
+                self.state.task_goal = task
         self._n_steps = 0
         self._n_format_errors = 0
         self.recovery.reset()

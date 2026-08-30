@@ -162,9 +162,8 @@ class RunManager:
             self.mode = mode
         if model:
             self.model = model
-        self._pending_goal = goal
         session.thread = threading.Thread(
-            target=self._run, args=(run_id, task, resume_path), daemon=True)
+            target=self._run, args=(run_id, task, resume_path, goal), daemon=True)
         session.thread.start()
         return {"ok": True, "run_id": run_id}
 
@@ -230,15 +229,17 @@ class RunManager:
             return fn(**kwargs)
         return fn()
 
-    def _run(self, run_id: str, task: str, resume_path: str | None = None) -> None:
+    def _run(self, run_id: str, task: str, resume_path: str | None = None,
+             goal: str | None = None) -> None:
         session = self._sessions[run_id]
         journal = self._make_journal(resume_path)
         session.journal = journal
         try:
             agent = self._build_agent(resume_path, journal)
             session.agent = agent
-            if self._pending_goal:
-                agent.state.task_goal = self._pending_goal  # 注入系统提示
+            if goal:
+                # 会话级目标：按 run 传递（多会话并行互不覆盖）
+                agent.state.task_goal = goal
 
             def on_stream(delta: str):
                 # 逐 token 流式输出（前端打字机效果）
