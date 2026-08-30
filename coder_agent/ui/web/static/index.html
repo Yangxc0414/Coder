@@ -690,16 +690,45 @@ function appendToolToTurn(tab, ev) {
   const body = tab.turnEl.querySelector(".turn-body");
   const det = document.createElement("details");
   det.className = "tool-details";
-  const mark = ev.success ? '<span class="ok">✓</span>' : '<span class="fail">✗</span>';
+  // PolicyGate 拦截识别：框架产生的错误以 "Policy denied:" 开头
+  const isPolicy = ev.detail && ev.detail.startsWith("Policy denied");
+  const mark = isPolicy ? '<span class="fail">🚦</span>'
+    : ev.success ? '<span class="ok">✓</span>' : '<span class="fail">✗</span>';
+  const label = isPolicy ? " 策略拦截" : "";
   det.innerHTML = "<summary>" + mark +
     " <span class='tool-name'>" + escHtml(ev.tool) + "</span>" +
+    label +
     (ev.target ? " <span class='tool-target'>→ " + escHtml(ev.target) + "</span>" : "") +
     "</summary><div class='body'>" +
-    (ev.detail ? "<span class='err-label'>error</span>\n" + escHtml(ev.detail) + "\n" : "") +
+    (ev.detail ? "<span class='err-label'>" + (isPolicy ? "policy" : "error") + "</span>\n" + escHtml(ev.detail) + "\n" : "") +
     (ev.preview || "(无输出)") + "</div>";
   body.appendChild(det);
   const n = body.querySelectorAll("details.tool-details").length;
   tab.turnEl.querySelector(".turn-count").textContent = n + " 步";
+  scrollFeedEl(tab.feedEl, nearBottom(tab.feedEl));
+}
+function appendVerifierCard(tab, ev) {
+  if (!tab.turnEl) beginTurn(tab, ev.step || 1);
+  const body = tab.turnEl.querySelector(".turn-body");
+  const det = document.createElement("details");
+  det.className = "tool-details";
+  det.open = true;
+  const mark = ev.passed ? '<span class="ok">✅</span>' : '<span class="fail">❌</span>';
+  det.innerHTML = "<summary>" + mark +
+    " <span class='tool-name'>Verifier 校验</span>" +
+    (ev.passed ? " 通过" : " 未通过 → 注入修复指令") +
+    "</summary><div class='body'><span class='res-label'>校验结果</span>\n" +
+    escHtml(ev.summary || "(无摘要)") + "</div>";
+  body.appendChild(det);
+  scrollFeedEl(tab.feedEl, nearBottom(tab.feedEl));
+}
+function appendCompressCard(tab, ev) {
+  const div = document.createElement("div");
+  div.className = "turn";
+  div.textContent = "📦 上下文压缩: 共 " + (ev.total_rounds || 0) +
+    " 轮 → 保留最近 " + (ev.kept_full || 0) + " 轮完整，压缩 " +
+    (ev.compressed || 0) + " 轮为摘要（估算 " + (ev.tokens_est || 0) + " tokens / 预算 " + (ev.budget || 0) + "）";
+  tab.feedEl.appendChild(div);
   scrollFeedEl(tab.feedEl, nearBottom(tab.feedEl));
 }
 function trackTool(tab, ev) {
@@ -772,6 +801,11 @@ function onEvent(ev, tab) {
     appendToolToTurn(tab, ev);
     trackTool(tab, ev);
     refreshActivity();
+  } else if (ev.kind === "verifier") {
+    clearPending(tab);
+    appendVerifierCard(tab, ev);
+  } else if (ev.kind === "compress") {
+    appendCompressCard(tab, ev);
   } else if (ev.kind === "turn") {
     finalizeStream(tab);
     clearPending(tab);

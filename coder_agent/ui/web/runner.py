@@ -291,11 +291,24 @@ class RunManager:
                 last_turn_step[0] = e.data.get("step")
                 self._emit(run_id, "turn", step=e.data.get("step"),
                            tokens=agent._tokens_used)
+                # 检测上下文压缩是否发生（三层压缩展示）
+                comp = getattr(getattr(agent, "context", None),
+                               "last_compression", None)
+                if comp and comp.get("compressed", 0) > 0 and comp != last_comp[0]:
+                    last_comp[0] = comp
+                    self._emit(run_id, "compress", **comp)
+
+            def on_verifier(e):
+                self._emit(run_id, "verifier", passed=bool(e.data.get("passed")),
+                           summary=str(e.data.get("summary") or "")[:400],
+                           step=e.data.get("step"))
 
             last_turn_step: list = [None]
+            last_comp: list = [None]
             agent.hooks.register("ASSISTANT_TEXT", on_text)
             agent.hooks.register("POST_TOOL_USE", on_tool)
             agent.hooks.register("TURN_STOPPED", on_turn)
+            agent.hooks.register("VERIFIER_RESULT", on_verifier)
 
             answer = agent.run(task)
             session.final_answer = answer

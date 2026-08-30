@@ -41,6 +41,7 @@ TURN_STOPPED = HookEvent("TURN_STOPPED")
 AGENT_STARTED = HookEvent("AGENT_STARTED")
 AGENT_ENDED = HookEvent("AGENT_ENDED")
 ASSISTANT_TEXT = HookEvent("ASSISTANT_TEXT")
+VERIFIER_RESULT = HookEvent("VERIFIER_RESULT")  # 校验结果（passed + summary）
 
 
 class HookRegistry:

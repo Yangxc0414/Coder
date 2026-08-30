@@ -80,6 +80,8 @@ class ContextManager:
                            else int(self.context_window * DEFAULT_CONTEXT_RATIO))
         self.keep_rounds = keep_rounds
         self.summary_max_chars = summary_max_chars
+        # 最近一次 build_messages 的压缩统计（UI 展示用；None=尚未调用/无压缩）
+        self.last_compression: dict | None = None
 
     def build_messages(
         self,
@@ -119,6 +121,7 @@ class ContextManager:
 
         if compress_count <= 0:
             # No compression needed, return all messages
+            self.last_compression = None
             result.extend(conv_messages)
             return result
 
@@ -152,6 +155,14 @@ class ContextManager:
             total_rounds, keep_from_end // 2, compress_count,
             current_tokens, budget,
         )
+        # 记录最近一次压缩统计（UI 展示三层压缩逻辑用）
+        self.last_compression = {
+            "total_rounds": total_rounds,
+            "kept_full": keep_from_end // 2,
+            "compressed": compress_count,
+            "tokens_est": current_tokens,
+            "budget": budget,
+        }
         return result
 
     def _split_into_rounds(self, messages: list[dict]) -> list[list[dict]]:

@@ -19,7 +19,7 @@ from .verifier import Verifier
 from .recovery import RecoveryStrategy
 from .mode import AgentMode
 from .inspector import ContextInspector
-from .hooks import HookRegistry, install_logging_hooks, install_trace_hooks, PRE_TOOL_USE, POST_TOOL_USE, TURN_STOPPED, AGENT_STARTED, AGENT_ENDED, ASSISTANT_TEXT
+from .hooks import HookRegistry, install_logging_hooks, install_trace_hooks, PRE_TOOL_USE, POST_TOOL_USE, TURN_STOPPED, AGENT_STARTED, AGENT_ENDED, ASSISTANT_TEXT, VERIFIER_RESULT
 from .extensions.base import SubagentRunner
 from .journal import SessionJournal
 
@@ -360,6 +360,9 @@ class Agent:
                     # 50-step flail.
                     if self._verifier:
                         passed, summary = self._verifier.check()
+                        self.hooks.fire(VERIFIER_RESULT.with_data(
+                            passed=passed, summary=summary[:300],
+                            step=self._n_steps))
                         self.trace.record(
                             self._n_steps, "verification",
                             passed=passed,
