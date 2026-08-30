@@ -300,7 +300,11 @@ class Agent:
 
                 # 思考文本（模型在调用工具之间的计划/分析）——REPL 等宿主
                 # 用它消除"两个工具调用之间长时间静止"的观感
-                if response.content and response.tool_calls:
+                # 思考文本（模型在调用工具之间的计划/分析）。有流式回调时
+                # 已通过 on_token 逐字展示（stream 事件），这里不重复 fire
+                # ASSISTANT_TEXT，避免同一段文字被展示两次（CLI 无流式，
+                # 保持原行为）。
+                if response.content and response.tool_calls and self.stream_callback is None:
                     self.hooks.fire(
                         ASSISTANT_TEXT.with_data(text=response.content, step=self._n_steps))
 

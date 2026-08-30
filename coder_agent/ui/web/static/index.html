@@ -1218,10 +1218,15 @@ async function openSession(file) {
     tab = createTab();
     addTabMsg(tab, "turn", "当前会话正在运行——已在新会话中打开历史");
   }
+  // 立即清空并显示加载中（避免上一个会话内容残留）
+  tab.feedEl.innerHTML = '<div style="color:var(--faint);font-size:12px;padding:20px;text-align:center;">加载会话中…</div>';
+  tab.turnEl = null; tab.turnStep = null; tab.streamEl = null; tab.pendingEl = null;
+  tab.stateInfo = null;
   const resp = await fetch("/api/session?file=" + encodeURIComponent(file));
   if (!resp.ok) {
     const e = await resp.json().catch(() => ({}));
-    addTabMsg(tab, "error", e.detail || "加载会话失败");
+    tab.feedEl.innerHTML = '<div style="color:var(--err);font-size:12px;padding:20px;text-align:center;">' +
+      escHtml(e.detail || "加载会话失败") + '</div>';
     return;
   }
   const data = await resp.json();
