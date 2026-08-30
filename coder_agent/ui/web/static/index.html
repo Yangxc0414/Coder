@@ -2055,7 +2055,20 @@ inputEl.addEventListener("keydown", (e) => {
     if (!v) return;
     if (v.startsWith("/")) {
       const cmd = currentCommand();
-      const isComplete = cmd && (v === cmd.name || v.startsWith(cmd.name + " "));
+      const isComplete = cmd && (
+        // 有参数命令：必须有参数才算完整（避免 /goal 无参数被直接执行）
+        (cmd.hasArgs && v.startsWith(cmd.name + " "))
+        || (!cmd.hasArgs && v === cmd.name)
+      );
+      // 有参数命令缺参数 → 补全等待输入（不执行、不弹长提示）
+      if (!isComplete && cmd && cmd.hasArgs && v === cmd.name) {
+        inputEl.value = cmd.name + " ";
+        hidePalette();
+        showParamHint("请输入参数: " + cmd.name + " " + (cmd.argHint || "<参数>") +
+          "（输入后按 Enter 执行）");
+        inputEl.focus();
+        return;
+      }
       if (paletteOpen && palItems[palIndex] && !isComplete) {
         pickPalette(palItems[palIndex]);
         return;
@@ -2226,7 +2239,7 @@ async function execLine(line) {
       submitTask(arg);
     } else addTabMsg(tab, "answer", tab.goal
       ? "当前会话目标: " + tab.goal
-      : "未设置（用法: /goal <目标描述>，设置后立即执行并持续直到达成）");
+      : "请输入: /goal <目标描述>（设置后立即执行）");
   } else if (cmd === "/sessions") {
     const d = await (await fetch("/api/sessions")).json();
     const card = addTabMsg(tab, "answer", "");
