@@ -169,8 +169,7 @@ class CoderRepl:
         """Show available commands."""
         help_text = """
 [bold yellow]Available Commands:[/bold yellow]
-  [cyan]<task>[/cyan] or /run  Run agent on a task (each /run is a fresh, isolated context;
-                                journaled for later /resume)
+  [cyan]<task> / /run[/cyan]   Run agent (isolated context, journaled)
   [cyan]/resume <file>[/cyan]  Restore a journaled session and continue it
   [cyan]/sessions[/cyan]       List journaled sessions
   [cyan]/mode <name>[/cyan]     Switch mode: goal / plan / dry-run / full (next /run)
@@ -178,7 +177,7 @@ class CoderRepl:
   [cyan]/status[/cyan]          Show context status
   [cyan]/tools[/cyan]           List tools available to the model
   [cyan]/compact[/cyan]         Compact last-run history (runs auto-compact anyway)
-  [cyan]/history[/cyan]         Show recent memory
+  [cyan]/history[/cyan]         Show messages of the last run
   [cyan]/trace[/cyan]           Show trace summary
   [cyan]/clear[/cyan]           Clear conversation display state
   [cyan]/exit[/cyan]            Exit
