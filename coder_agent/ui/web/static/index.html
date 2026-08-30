@@ -375,6 +375,27 @@
       <input type="password" id="cfg-apikey" placeholder="sk-...">
       <div class="config-hint" id="cfg-keyhint"></div>
     </div>
+    <div style="margin:16px 0;border-top:1px solid var(--border);padding-top:14px;">
+      <b style="font-size:13px;color:var(--text);">🧠 上下文管理</b>
+      <div style="font-size:11px;color:var(--faint);margin:4px 0 10px;">
+        对话达到预算阈值时自动压缩：保留最近轮次完整 + 更早消息压缩为摘要
+      </div>
+      <div class="config-row">
+        <label>上下文窗口（tokens，0=按模型自动）</label>
+        <input type="number" id="cfg-contextwin" placeholder="0 = 自动（如 agnes-2.5-flash → 131072）" min="0" step="1024">
+        <div class="config-hint" id="cfg-contextwin-hint"></div>
+      </div>
+      <div class="config-row">
+        <label>压缩阈值（窗口比例 %）</label>
+        <input type="number" id="cfg-contextratio" placeholder="80" min="10" max="100" step="5">
+        <div class="config-hint">达到窗口的该比例即开始压缩旧消息</div>
+      </div>
+      <div class="config-row">
+        <label>保留轮数（最近 N 轮保持完整）</label>
+        <input type="number" id="cfg-keeprounds" placeholder="6" min="1" max="50">
+        <div class="config-hint">更早的轮次会被压缩为摘要</div>
+      </div>
+    </div>
     <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end;">
       <button class="header-btn" onclick="closeConfigModal()">取消</button>
       <button class="primary" onclick="saveConfig()">保存配置</button>
@@ -408,6 +429,7 @@ const AppState = {
   sessionCount: 0,
   commands: [],
   models: [],
+  contextInfo: null,
 };
 const Tabs = { list: [], active: null, seq: 0 };
 const inputEl = document.getElementById("task");
@@ -1337,6 +1359,17 @@ async function openConfigModal() {
   document.getElementById("cfg-apikey").value = "";
   document.getElementById("cfg-keyhint").textContent =
     cfg.api_key_set ? "✅ 已配置 API Key（留空保持不变）" : "⚠️ 未配置 API Key";
+  // 上下文配置
+  document.getElementById("cfg-contextwin").value =
+    cfg.context_window && cfg.context_window !== cfg.context_budget ? cfg.context_window : "";
+  document.getElementById("cfg-contextwin").placeholder =
+    "0 = 自动（" + cfg.model + " → " + (cfg.context_budget || 0) + " 预算）";
+  document.getElementById("cfg-contextwin-hint").textContent =
+    "当前预算 " + (cfg.context_budget || "?") + " tokens = 窗口 × " +
+    Math.round((cfg.context_ratio || 0.8) * 100) + "%";
+  document.getElementById("cfg-contextratio").value =
+    Math.round((cfg.context_ratio || 0.8) * 100);
+  document.getElementById("cfg-keeprounds").value = cfg.keep_rounds || 6;
   document.getElementById("configModal").classList.add("show");
 }
 function closeConfigModal() { document.getElementById("configModal").classList.remove("show"); }
@@ -1348,6 +1381,13 @@ async function saveConfig() {
   if (model) body.model = model;
   if (baseUrl) body.base_url = baseUrl;
   if (apiKey) body.api_key = apiKey;
+  // 上下文配置（0/空 = 自动）
+  const cw = parseInt(document.getElementById("cfg-contextwin").value, 10);
+  if (!isNaN(cw)) body.context_window = cw;  // 0 表示清除自定义值
+  const cr = parseFloat(document.getElementById("cfg-contextratio").value);
+  if (!isNaN(cr) && cr > 0) body.context_ratio = cr / 100;
+  const kr = parseInt(document.getElementById("cfg-keeprounds").value, 10);
+  if (!isNaN(kr) && kr > 0) body.keep_rounds = kr;
   const resp = await fetch("/api/config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1360,7 +1400,9 @@ async function saveConfig() {
     closeConfigModal();
     const t = activeTab();
     if (t) addTabMsg(t, "turn", "⚙ 配置已保存: 模型=" + (data.model || model || "不变") +
-      (baseUrl ? " | Base URL=" + baseUrl : "") + (apiKey ? " | API Key 已更新" : ""));
+      (baseUrl ? " | Base URL=" + baseUrl : "") + (apiKey ? " | API Key 已更新" : "") +
+      " | 上下文预算=" + (data.budget || "?") + " tokens" +
+      (data.keep_rounds ? " | 保留 " + data.keep_rounds + " 轮" : ""));
   } else {
     const t = activeTab();
     if (t) addTabMsg(t, "error", data.detail || "保存配置失败");
@@ -1742,6 +1784,19 @@ function renderActivity() {
       ? "<div class='act-goal'>🎯 " + escHtml(AppState.sessionGoal) + "</div>"
       : "<div class='act-empty'>未设置 — 输入 /goal 设置目标</div>") +
     "</div>";
+  // 上下文占用（模型感知的预算）
+  const cw = AppState.contextInfo || {};
+  const budget = cw.budget || 0;
+  const used = Math.min(st.tokens, budget) || 0;
+  const pct = budget ? Math.round(used / budget * 100) : 0;
+  html += "<div class='act-section'><div class='as-title'>上下文压缩</div>" +
+    "<div class='act-goal'>📏 预算: " + (budget ? budget.toLocaleString() : "?") +
+    " tokens (" + (cw.model || document.getElementById("model").value) +
+    " × " + Math.round((cw.ratio || 0.8) * 100) + "%)" +
+    (cw.keep_rounds ? "<br>🔒 保留最近 " + cw.keep_rounds + " 轮完整" : "") +
+    "<br>📊 当前估算占用: " + (used ? used.toLocaleString() : "0") + " (" + pct + "%)" +
+    (pct >= 80 ? "<br>⚠️ 接近预算，即将压缩旧消息" : "") +
+    "</div></div>";
   html += "<div class='act-section'><div class='as-title'>当前配置</div>" +
     "<div class='act-goal'>🤖 " + escHtml(document.getElementById("model").value) +
     "<br>⚙ " + escHtml(document.getElementById("mode").value) +
@@ -1770,6 +1825,10 @@ async function init() {
   try {
     const cfg = await (await fetch("/api/config")).json();
     document.getElementById("model").value = cfg.model || document.getElementById("model").value;
+    AppState.contextInfo = {
+      model: cfg.model, budget: cfg.context_budget,
+      ratio: cfg.context_ratio, keep_rounds: cfg.keep_rounds,
+    };
   } catch (e) {}
   updateGoalBadge();
   createTab();

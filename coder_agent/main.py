@@ -70,8 +70,8 @@ def main() -> None:
                         help="Show available model configurations")
     parser.add_argument("--mode", choices=[m.value for m in AgentMode],
                         default="goal", help="Agent execution mode: goal/plan/dry-run/full")
-    parser.add_argument("--max-tokens", type=int, default=8000,
-                        help="Context token budget (default: 8000)")
+    parser.add_argument("--max-tokens", type=int, default=None,
+                        help="Context token budget (default: 80% of model's context window)")
     parser.add_argument("--keep-rounds", type=int, default=6,
                         help="Recent rounds to keep full (default: 6)")
     parser.add_argument("--trace-output", type=str, help="Path to save trace.jsonl")

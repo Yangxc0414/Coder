@@ -78,8 +78,11 @@ class RunManager:
 
     def set_config(self, model: str | None = None,
                    base_url: str | None = None,
-                   api_key: str | None = None) -> dict:
-        """更新模型/API 配置并持久化（立即影响后续运行）。"""
+                   api_key: str | None = None,
+                   context_window: int | None = None,
+                   context_ratio: float | None = None,
+                   keep_rounds: int | None = None) -> dict:
+        """更新模型/API/上下文配置并持久化（立即影响后续运行）。"""
         cfg = load_config()
         if model:
             self.model = model
@@ -96,8 +99,38 @@ class RunManager:
                 cfg["api_key"] = api_key
             else:
                 cfg.pop("api_key", None)
+        if context_window is not None:
+            if context_window > 0:
+                cfg["context_window"] = int(context_window)
+            else:
+                cfg.pop("context_window", None)
+        if context_ratio is not None:
+            if 0 < context_ratio <= 1:
+                cfg["context_ratio"] = float(context_ratio)
+            else:
+                cfg.pop("context_ratio", None)
+        if keep_rounds is not None:
+            if keep_rounds > 0:
+                cfg["keep_rounds"] = int(keep_rounds)
+            else:
+                cfg.pop("keep_rounds", None)
         save_config(cfg)
         return {"ok": True, "model": self.model}
+
+    def context_info(self) -> dict:
+        """当前上下文压缩配置（窗口/预算/保留轮数）。"""
+        from coder_agent.context import resolve_context_window
+        cfg = load_config()
+        window = int(cfg.get("context_window") or resolve_context_window(self.model))
+        ratio = float(cfg.get("context_ratio") or 0.8)
+        keep = int(cfg.get("keep_rounds") or 6)
+        return {
+            "model": self.model,
+            "context_window": window,
+            "budget": int(window * ratio),
+            "ratio": ratio,
+            "keep_rounds": keep,
+        }
 
     # ── 运行管理 ────────────────────────────────────────────────────────
 
@@ -162,6 +195,14 @@ class RunManager:
         from coder_agent.agent import Agent
         from coder_agent.verifier import Verifier
         from coder_agent.mode import AgentMode
+        from coder_agent.context import ContextManager, resolve_context_window
+        cfg = load_config()
+        window = int(cfg.get("context_window") or resolve_context_window(self.model))
+        ratio = float(cfg.get("context_ratio") or 0.8)
+        keep = int(cfg.get("keep_rounds") or 6)
+        context_manager = ContextManager(
+            max_tokens=int(window * ratio), keep_rounds=keep,
+            model=self.model, context_window=window)
         registry = create_default_registry(self.workspace, AgentMode(self.mode))
         return Agent(
             llm_client=LLMClient(model=self.model, api_key=self.api_key,
@@ -170,6 +211,7 @@ class RunManager:
             mode=AgentMode(self.mode),
             verifier=Verifier(self.workspace, task=""),
             journal=journal,
+            context_manager=context_manager,
         )
 
     def _build_agent(self, resume_path: str | None, journal):

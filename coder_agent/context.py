@@ -26,25 +26,60 @@ DEFAULT_KEEP_ROUNDS = 6
 # Max characters for a compressed summary
 DEFAULT_SUMMARY_MAX_CHARS = 150
 
+# 模型上下文窗口映射（模式匹配，单位 tokens）——压缩阈值按窗口比例计算
+MODEL_CONTEXT_WINDOWS: dict[str, int] = {
+    "agnes-2.5-pro": 262144,   # 256K
+    "agnes-2.0-pro": 262144,
+    "agnes": 131072,           # agnes 系列默认 128K
+    "deepseek": 65536,
+    "gpt-4o": 131072,
+    "gpt-4-turbo": 131072,
+    "gpt-4": 8192,
+    "gpt-3.5": 16385,
+    "claude": 200000,
+    "gemini": 1048576,
+}
+DEFAULT_CONTEXT_WINDOW = 131072
+# 对话预算占窗口的比例（其余留给系统提示 + 工具 schema）
+DEFAULT_CONTEXT_RATIO = 0.8
+
+
+def resolve_context_window(model: str) -> int:
+    """按模型名解析上下文窗口大小（模式匹配 + 默认 128K）。"""
+    m = (model or "").lower()
+    for pattern, win in MODEL_CONTEXT_WINDOWS.items():
+        if pattern in m:
+            return win
+    return DEFAULT_CONTEXT_WINDOW
+
 
 class ContextManager:
     """Manages LLM conversation context to prevent token overflow.
 
     Each time before calling the LLM, call `build_messages()` to get a
     token-bounded version of the full message history.
+
+    Budget is model-aware: when max_tokens is not given explicitly it
+    defaults to ``context_window * DEFAULT_CONTEXT_RATIO`` (e.g. 80% of
+    the model's context window), so different models compress at
+    different thresholds automatically.
     """
 
     def __init__(
         self,
-        max_tokens: int = DEFAULT_MAX_TOKENS,
+        max_tokens: int | None = None,
         keep_rounds: int = DEFAULT_KEEP_ROUNDS,
         summary_max_chars: int = DEFAULT_SUMMARY_MAX_CHARS,
         model: str = "gpt-4o",
+        context_window: int | None = None,
     ) -> None:
-        self.max_tokens = max_tokens
+        self.model = model
+        self.context_window = (context_window
+                               or resolve_context_window(model))
+        self.max_tokens = (max_tokens if max_tokens is not None
+                           else int(self.context_window * DEFAULT_CONTEXT_RATIO))
         self.keep_rounds = keep_rounds
         self.summary_max_chars = summary_max_chars
-        self.model = model
 
     def build_messages(
         self,

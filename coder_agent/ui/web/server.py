@@ -51,6 +51,9 @@ class ConfigRequest(BaseModel):
     model: str | None = None
     base_url: str | None = None
     api_key: str | None = None
+    context_window: int | None = None
+    context_ratio: float | None = None
+    keep_rounds: int | None = None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -312,19 +315,29 @@ def api_get_config():
     m = get_manager()
     cfg = load_config()
     env_url = os.getenv("OPENAI_BASE_URL")
+    info = m.context_info()
     return {
         "model": m.model,
         "base_url": m.base_url or env_url or "https://api.agnes-ai.cn/v1",
         "api_key_set": bool(m.api_key or os.getenv("OPENAI_API_KEY")),
         "workspace": str(m.workspace),
+        # 上下文压缩配置（模型感知）
+        "context_window": info["context_window"],
+        "context_ratio": info["ratio"],
+        "keep_rounds": info["keep_rounds"],
+        "context_budget": info["budget"],
     }
 
 
 @app.post("/api/config")
 def api_set_config(req: ConfigRequest):
     m = get_manager()
-    m.set_config(model=req.model, base_url=req.base_url, api_key=req.api_key)
-    return {"ok": True, "model": m.model}
+    m.set_config(model=req.model, base_url=req.base_url, api_key=req.api_key,
+                 context_window=req.context_window,
+                 context_ratio=req.context_ratio,
+                 keep_rounds=req.keep_rounds)
+    info = m.context_info()
+    return {"ok": True, "model": m.model, **info}
 
 
 # ── 会话详情（历史回放，按 turn 分组）─────────────────────────────────

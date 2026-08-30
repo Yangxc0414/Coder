@@ -110,7 +110,9 @@ class Agent:
         self.registry = registry
         self.workspace = Path(workspace).resolve()
         self.policy = policy_gate or PolicyGate()
-        self.context = context_manager or ContextManager()
+        # 模型感知的上下文管理：未显式传入时按模型窗口自动定预算
+        self.context = context_manager or ContextManager(
+            model=getattr(llm_client, "model", "gpt-4o"))
         self.state = AgentState()
         self.memory = Memory()
         self._loop_warning_injected = False
