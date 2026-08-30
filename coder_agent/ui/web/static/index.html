@@ -14,7 +14,9 @@
   aside button.session:hover { border-color: #4fc3f7; }
   main { flex: 1; display: flex; flex-direction: column; }
   header { padding: 10px 16px; border-bottom: 1px solid #2a2e36; display: flex; gap: 10px; align-items: center; }
-  select, input[type=text] { background: #22262d; color: #e6e6e6; border: 1px solid #2a2e36; border-radius: 6px; padding: 6px 10px; }
+  select, input[type=text], textarea { background: #22262d; color: #e6e6e6; border: 1px solid #2a2e36; border-radius: 6px; padding: 6px 10px; }
+  textarea { flex: 1; font-family: inherit; font-size: 14px; line-height: 1.5; max-height: 160px; }
+  textarea:focus { outline: none; border-color: #4fc3f7; }
   #feed { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
   .user { align-self: flex-end; background: #1e3a5f; border-radius: 10px 10px 2px 10px; padding: 8px 12px; max-width: 75%; white-space: pre-wrap; }
   .answer { align-self: flex-start; background: #16321f; border: 1px solid #2e7d32; border-radius: 10px 10px 10px 2px; padding: 10px 14px; max-width: 85%; white-space: pre-wrap; }
@@ -104,7 +106,8 @@
     <span id="f-copy">© Coder-Agent（自研，零框架）</span>
   </div>
   <form id="form">
-    <input type="text" id="task" placeholder="输入编程任务（Enter 发送）…" autocomplete="off">
+    <textarea id="task" rows="1" placeholder="输入编程任务… Enter 发送 / Shift+Enter 换行 / 输入 / 呼出命令面板"
+      autocomplete="off" style="resize:none; overflow:hidden;"></textarea>
     <button type="submit" class="primary" id="send">运行</button>
     <button type="button" class="stop" id="stop" onclick="abort()">■ 停止</button>
   </form>
@@ -161,10 +164,17 @@ $/, "")) +
 const stateEl = document.getElementById("state");
 let running = false;
 
+function nearBottom() {
+  return feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
+}
+function scrollFeed(force) {
+  if (force || nearBottom()) feed.scrollTop = feed.scrollHeight;
+}
 function add(cls, text) {
+  const stick = nearBottom();
   const div = document.createElement("div");
   div.className = cls; div.textContent = text;
-  feed.appendChild(div); feed.scrollTop = feed.scrollHeight;
+  feed.appendChild(div); scrollFeed(stick || cls === "user");
   return div;
 }
 
@@ -335,14 +345,19 @@ inputEl.addEventListener("input", updatePalette);
 inputEl.addEventListener("keydown", (e) => {
   const v = inputEl.value;
   const paletteOpen = paletteEl.style.display === "block";
-  if (e.key === "Escape" && paletteOpen) { hidePalette(); e.preventDefault(); return; }
+  if (e.key === "Escape") {
+    if (paletteOpen) { hidePalette(); e.preventDefault(); return; }
+    if (running) { abort(); e.preventDefault(); }
+    return;
+  }
+  if (e.key === "Enter" && e.shiftKey) return;  // 换行走默认行为
   if (paletteOpen && e.key === "ArrowDown") { movePalette(1); e.preventDefault(); return; }
   if (paletteOpen && e.key === "ArrowUp") { movePalette(-1); e.preventDefault(); return; }
   if (e.key === "Tab" && paletteOpen && palItems[palIndex]) {
     inputEl.value = palItems[palIndex].name + (palItems[palIndex].hasArgs ? " " : "");
     updatePalette(); e.preventDefault(); return;
   }
-  if (e.key === "Enter" && !e.shiftKey) {
+  if (e.key === "Enter") {
     e.preventDefault();
     if (paletteOpen && palItems[palIndex] && v.trim() === palItems[palIndex].name && palItems[palIndex].hasArgs) {
       inputEl.value = palItems[palIndex].name + " ";
@@ -369,7 +384,7 @@ async function listenEvents() {
         '<div class="body">' + escHtml(ev.detail ? ("error: " + ev.detail + "
 ") : "") +
         (ev.preview || "(无输出)") + "</div>";
-      feed.appendChild(det); feed.scrollTop = feed.scrollHeight;
+      feed.appendChild(det); scrollFeed(nearBottom());
     }
     else if (ev.kind === "turn") {
       add("turn", "── turn " + ev.step + " ──");
@@ -380,7 +395,7 @@ async function listenEvents() {
       const div = document.createElement("div");
       div.className = "answer";
       div.appendChild(renderMarkdown(ev.answer));
-      feed.appendChild(div); feed.scrollTop = feed.scrollHeight;
+      feed.appendChild(div); scrollFeed(nearBottom());
     }
     else if (ev.kind === "error") add("error", ev.error);
     else if (ev.kind === "status") add("turn", ev.message);
@@ -450,6 +465,11 @@ async function loadSessions() {
 }
 loadSessions();
 loadWorkspace();
+const ta = document.getElementById("task");
+ta.addEventListener("input", () => {
+  ta.style.height = "auto";
+  ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
+});
 </script>
 </body>
 </html>
