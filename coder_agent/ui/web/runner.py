@@ -147,9 +147,26 @@ class RunManager:
     def _emit(self, kind: str, **data: Any) -> None:
         self._events.put({"kind": kind, **data})
 
+    def _build_agent(self, resume_path: str | None = None):
+        """创建 agent：优先传 resume_path（默认工厂用于 journal 追加），
+        外部注入的无参工厂保持兼容。"""
+        import inspect
+        try:
+            sig = inspect.signature(self._agent_factory)
+            accepts = any(
+                p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+                or p.kind == inspect.Parameter.VAR_POSITIONAL
+                for p in sig.parameters.values()
+            )
+        except (ValueError, TypeError):
+            accepts = False
+        if accepts:
+            return self._agent_factory(resume_path)
+        return self._agent_factory()
+
     def _run(self, task: str, resume_path: str | None = None) -> None:
         try:
-            agent = self._agent_factory(resume_path)
+            agent = self._build_agent(resume_path)
             self._agent = agent
             self._journal = getattr(self, "_journal", None)
             if self._pending_goal:

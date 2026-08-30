@@ -147,6 +147,8 @@
   #footer { padding: 8px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--faint); display: flex; gap: 16px; background: var(--bg2); align-items: center; }
   .footer-stat { display: flex; align-items: center; gap: 4px; }
   .footer-stat span { color: var(--faint); }
+  #goalBadge { display: none; align-items: center; gap: 4px; cursor: pointer; background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 1px 10px; font-size: 11px; color: var(--accent); }
+  #goalBadge:hover { border-color: var(--accent); }
   .footer-right { margin-left: auto; display: flex; gap: 12px; align-items: center; }
   .theme-btn { background: none; border: 1px solid var(--border2); color: var(--muted); border-radius: 6px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
   .theme-btn:hover { border-color: var(--accent); color: var(--accent); }
@@ -157,8 +159,9 @@
   #palette .item { padding: 10px 14px; cursor: pointer; display: flex; gap: 12px; align-items: center; transition: background .15s; }
   #palette .item:hover, #palette .item.active { background: var(--bg3); }
   #palette .item .name { color: var(--accent); font-family: Consolas, monospace; font-size: 12px; min-width: 120px; }
-  #palette .item .desc { color: var(--muted); font-size: 11px; }
-  #palette .item .kbd { color: var(--faint); font-size: 10px; margin-left: auto; border: 1px solid var(--border2); border-radius: 3px; padding: 1px 5px; }
+  #palette .item .desc { color: var(--muted); font-size: 11px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #palette .item .stat { color: var(--faint); font-size: 10px; font-family: Consolas, monospace; margin-left: auto; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #palette .item .kbd { color: var(--faint); font-size: 10px; border: 1px solid var(--border2); border-radius: 3px; padding: 1px 5px; }
   #palette .empty { padding: 12px 14px; color: var(--faint); font-size: 12px; }
   #paramHint { display: none; font-size: 11px; color: var(--accent); padding: 2px 4px; }
 
@@ -278,7 +281,7 @@
   <header>
     <div class="header-group">
       <span class="header-label">模式</span>
-      <select id="mode">
+      <select id="mode" title="full: 完整执行 | goal: 目标驱动（注入会话目标）| plan: 先规划再执行 | dry-run: 只预览不落盘">
         <option value="full">full</option>
         <option value="goal">goal</option>
         <option value="plan">plan</option>
@@ -322,6 +325,7 @@
     <div class="footer-stat"><span>tokens:</span><span id="f-tokens">0</span></div>
     <div class="footer-stat"><span>steps:</span><span id="f-steps">0</span></div>
     <div class="footer-stat"><span>mode:</span><span id="f-mode">full</span></div>
+    <span id="goalBadge" title="点击清除会话目标">🎯 <span id="goalBadgeText"></span></span>
     <span class="footer-right">
       <span>© Coder-Agent 自研 · 零框架</span>
       <button class="theme-btn" onclick="toggleTheme()" id="themeBtn2">🌙</button>
@@ -401,6 +405,7 @@
 const AppState = {
   running: false,
   sessionGoal: localStorage.getItem('coder_goal') || '',
+  sessionCount: 0,
   commands: [],
   models: [],
   es: null,
@@ -853,6 +858,22 @@ function downloadSession() {
 }
 
 /* ═══════════ 会话列表（按项目/工作区分组）═══════════ */
+function updateGoalBadge() {
+  const b = document.getElementById("goalBadge");
+  if (AppState.sessionGoal) {
+    b.style.display = "inline-flex";
+    document.getElementById("goalBadgeText").textContent =
+      AppState.sessionGoal.length > 20 ? AppState.sessionGoal.slice(0, 20) + "…" : AppState.sessionGoal;
+  } else {
+    b.style.display = "none";
+  }
+}
+document.getElementById("goalBadge").addEventListener("click", () => {
+  AppState.sessionGoal = "";
+  localStorage.removeItem('coder_goal');
+  updateGoalBadge();
+  add("turn", "🎯 会话目标已清除");
+});
 function sessionProject(ws) {
   if (!ws) return "未分类";
   const parts = ws.replace(/[\\/]+$/, "").split(/[\\/]/);
@@ -861,9 +882,10 @@ function sessionProject(ws) {
 async function loadSessions() {
   const resp = await fetch("/api/sessions");
   const data = await resp.json();
+  const sessions = data.sessions || [];
+  AppState.sessionCount = sessions.length;
   const box = document.getElementById("sessions");
   box.innerHTML = "";
-  const sessions = data.sessions || [];
   if (!sessions.length) {
     box.innerHTML = '<div style="font-size:11px;color:var(--faint);padding:8px;">暂无会话</div>';
     return;
@@ -1213,6 +1235,33 @@ function showParamHint(text) {
 function hideParamHint() {
   document.getElementById("paramHint").style.display = "none";
 }
+function cmdStatus(c) {
+  // 每个命令在面板中显示当前动态状态（与框架状态对齐）
+  switch (c.name) {
+    case "/model":
+      return document.getElementById("model").value || "?";
+    case "/mode":
+      return document.getElementById("mode").value;
+    case "/goal":
+      return AppState.sessionGoal
+        ? "🎯 " + (AppState.sessionGoal.length > 16 ? AppState.sessionGoal.slice(0, 16) + "…" : AppState.sessionGoal)
+        : "未设置";
+    case "/sessions":
+      return AppState.sessionCount ? AppState.sessionCount + " 个会话" : "无会话";
+    case "/resume":
+      return AppState.sessionCount ? "可恢复" : "无会话";
+    case "/status":
+      return AppState.running ? "● 运行中" : "○ 空闲";
+    case "/compact":
+      return Stats.steps ? "已记录 " + Stats.steps + " 步" : "—";
+    case "/history":
+      return Stats.steps ? "最近 10 条" : "—";
+    case "/trace":
+      return Stats.steps ? "可查看" : "—";
+    default:
+      return "";
+  }
+}
 function renderPalette(items) {
   palItems = items;
   palIndex = items.length ? 0 : -1;
@@ -1224,8 +1273,10 @@ function renderPalette(items) {
     items.forEach((c, i) => {
       const div = document.createElement("div");
       div.className = "item" + (i === palIndex ? " active" : "");
+      const st = cmdStatus(c);
       div.innerHTML = '<span class="name">' + escHtml(c.name) + '</span>' +
         '<span class="desc">' + escHtml(c.desc) + '</span>' +
+        (st ? '<span class="stat">' + escHtml(st) + '</span>' : '') +
         (c.hasArgs ? '<span class="kbd">参数</span>' : '<span class="kbd">⏎</span>');
       div.onclick = () => pickPalette(c);
       paletteEl.appendChild(div);
@@ -1344,7 +1395,23 @@ async function execLine(line) {
   const cmd = parts[0], arg = parts.slice(1).join(" ");
   if (cmd === "/help") {
     const card = add("answer", "");
-    card.innerHTML = "<b>可用命令</b><br>" + AppState.commands.map(c => "  " + c.name + " — " + c.desc).join("<br>");
+    const groups = [
+      ["📖 基本信息", ["/help", "/status", "/tools"]],
+      ["🚀 运行控制", ["/model", "/mode", "/goal"]],
+      ["🗂 会话管理", ["/sessions", "/resume"]],
+      ["🧠 上下文与追踪", ["/compact", "/history", "/trace", "/clear"]],
+    ];
+    let html = "<b>命令帮助</b>（右侧为当前状态）<br><br>";
+    groups.forEach(([gname, names]) => {
+      html += "<b>" + gname + "</b><br>";
+      AppState.commands.filter(c => names.includes(c.name)).forEach(c => {
+        html += "  <span style='color:var(--accent);font-family:Consolas,monospace;'>" + c.name + "</span>" +
+          (c.argHint ? " <span style='color:var(--muted);'>" + escHtml(c.argHint) + "</span>" : "") +
+          "<br>      " + escHtml(c.desc) + (cmdStatus(c) ? "  <span style='color:var(--faint);'>[" + escHtml(cmdStatus(c)) + "]</span>" : "") + "<br>";
+      });
+      html += "<br>";
+    });
+    card.innerHTML = html;
     card.style.whiteSpace = "pre-wrap";
   } else if (cmd === "/status") {
     const s = await (await fetch("/api/status")).json();
@@ -1381,11 +1448,13 @@ async function execLine(line) {
     if (arg === "clear") {
       AppState.sessionGoal = "";
       localStorage.removeItem('coder_goal');
+      updateGoalBadge();
       add("answer", "会话目标已清除");
     } else if (arg) {
       AppState.sessionGoal = arg;
       localStorage.setItem('coder_goal', arg);
-      add("answer", "会话目标已设置: " + arg + "\n将随每次运行注入系统提示");
+      updateGoalBadge();
+      add("answer", "会话目标已设置: " + arg + "\n将随每次运行注入系统提示（Goal 字段）");
     } else add("answer", AppState.sessionGoal ? "当前会话目标: " + AppState.sessionGoal : "未设置（用法: /goal <text>）");
   } else if (cmd === "/sessions") {
     const d = await (await fetch("/api/sessions")).json();
@@ -1467,6 +1536,7 @@ async function init() {
     const cfg = await (await fetch("/api/config")).json();
     document.getElementById("model").value = cfg.model || document.getElementById("model").value;
   } catch (e) {}
+  updateGoalBadge();
   renderWelcome();
 }
 init();
