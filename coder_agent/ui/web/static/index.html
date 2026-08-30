@@ -41,7 +41,8 @@
   .sidebar-tab { flex: 1; padding: 6px; font-size: 12px; background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; color: var(--muted); cursor: pointer; text-align: center; transition: all .15s; }
   .sidebar-tab.active { background: var(--user-bg); border-color: var(--accent); color: var(--accent); }
   .sidebar-tab:hover:not(.active) { border-color: var(--border2); color: var(--text); }
-  .sidebar-content { flex: 1; overflow-y: auto; padding: 8px 14px; }
+  .sidebar-content { flex: 1; overflow-y: auto; padding: 8px 14px; display: flex; flex-direction: column; }
+  #pane-files { display: none; }
   .sidebar-content::-webkit-scrollbar { width: 4px; }
   .sidebar-content::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 2px; }
   .session-item { position: relative; padding: 8px 10px; font-size: 11px; background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; color: var(--muted); cursor: pointer; margin-bottom: 4px; transition: all .15s; word-break: break-all; line-height: 1.4; }
@@ -263,11 +264,11 @@
     <button class="sidebar-tab" id="tab-files" onclick="showTab('files')">文件</button>
   </div>
   <div class="sidebar-content" id="pane-sessions">
-    <div style="font-size:11px; color:var(--faint); margin-bottom:8px;">历史会话（点击查看详情）</div>
+    <div style="font-size:11px; color:var(--faint); margin-bottom:8px;">按项目分组的会话</div>
     <div id="sessions"></div>
     <button class="refresh-btn" onclick="loadSessions()">↻ 刷新</button>
   </div>
-  <div class="sidebar-content" id="pane-files" style="display:none;">
+  <div class="sidebar-content" id="pane-files">
     <button class="refresh-btn" onclick="loadFiles()">↻ 刷新文件树</button>
     <div id="filetree" style="margin-top:8px;"></div>
   </div>
@@ -286,7 +287,8 @@
     </div>
     <div class="header-group input-wrapper">
       <span class="header-label">模型</span>
-      <input type="text" id="model" style="width:140px;" placeholder="选择模型..." readonly>
+      <input type="text" id="model" style="width:150px;" placeholder="输入模型名..." list="modelList" title="可直接输入模型名，回车/失焦保存">
+      <datalist id="modelList"></datalist>
       <div id="modelDropdown"></div>
     </div>
     <button class="header-btn" id="activityBtn" onclick="toggleActivity()">📊 活动</button>
@@ -345,9 +347,10 @@
       <button class="modal-close" onclick="closeConfigModal()">✕</button>
     </div>
     <div class="config-row">
-      <label>模型</label>
-      <select id="cfg-model"></select>
-      <div class="config-hint">从在线模型列表加载；也可手动输入</div>
+      <label>模型（可直接输入名称）</label>
+      <input type="text" id="cfg-model" list="cfgModelList" placeholder="agnes-2.5-flash">
+      <datalist id="cfgModelList"></datalist>
+      <div class="config-hint">从在线模型列表下拉选择，或直接输入自定义模型名</div>
     </div>
     <div class="config-row">
       <label>API Base URL</label>
@@ -849,7 +852,12 @@ function downloadSession() {
   URL.revokeObjectURL(a.href);
 }
 
-/* ═══════════ 会话列表 ═══════════ */
+/* ═══════════ 会话列表（按项目/工作区分组）═══════════ */
+function sessionProject(ws) {
+  if (!ws) return "未分类";
+  const parts = ws.replace(/[\\/]+$/, "").split(/[\\/]/);
+  return parts[parts.length - 1] || ws;
+}
 async function loadSessions() {
   const resp = await fetch("/api/sessions");
   const data = await resp.json();
@@ -860,71 +868,135 @@ async function loadSessions() {
     box.innerHTML = '<div style="font-size:11px;color:var(--faint);padding:8px;">暂无会话</div>';
     return;
   }
+  // 按项目分组
+  const groups = {};
   sessions.forEach(s => {
-    const div = document.createElement("div");
-    div.className = "session-item";
-    div.dataset.file = s.file;
-    if (s.file === AppState.currentSessionFile) div.classList.add("active");
-    const time = s.file.split(/[\\/]/).pop().replace(/\.jsonl$/, "").replace(/^session_/, "");
-    div.innerHTML = escHtml(s.task || "无标题") +
-      '<div class="session-meta"><span>🗂 ' + escHtml(time) + '</span></div>' +
-      '<button class="session-del" title="删除会话">🗑</button>';
-    div.querySelector(".session-del").onclick = async (e) => {
-      e.stopPropagation();
-      if (!confirm("删除该会话？")) return;
-      const r = await fetch("/api/session?file=" + encodeURIComponent(s.file), { method: "DELETE" });
-      if (r.ok) {
-        if (AppState.currentSessionFile === s.file) closeHistory();
-        loadSessions();
-      }
-    };
-    div.onclick = () => openSession(s.file);
-    box.appendChild(div);
+    const proj = sessionProject(s.workspace);
+    (groups[proj] = groups[proj] || []).push(s);
+  });
+  // 当前工作区优先置顶
+  let curWs = "";
+  try { curWs = (await (await fetch("/api/workspace")).json()).workspace; } catch (e) {}
+  const curProj = sessionProject(curWs);
+  const projOrder = Object.keys(groups).sort((a, b) => {
+    if (a === curProj) return -1;
+    if (b === curProj) return 1;
+    return 0;
+  });
+  projOrder.forEach(proj => {
+    const gh = document.createElement("div");
+    gh.style.cssText = "font-size:11px;color:var(--accent);margin:10px 2px 4px;font-weight:600;";
+    gh.textContent = "📁 " + proj + (proj === curProj ? "（当前）" : "") +
+      " · " + groups[proj].length + " 个会话";
+    box.appendChild(gh);
+    groups[proj].forEach(s => {
+      const div = document.createElement("div");
+      div.className = "session-item";
+      div.dataset.file = s.file;
+      if (s.file === AppState.currentSessionFile) div.classList.add("active");
+      const time = s.file.split(/[\\/]/).pop().replace(/\.jsonl$/, "").replace(/^session_/, "");
+      div.innerHTML = escHtml(s.task || "无标题") +
+        '<div class="session-meta"><span>🗂 ' + escHtml(time) + '</span></div>' +
+        '<button class="session-del" title="删除会话">🗑</button>';
+      div.querySelector(".session-del").onclick = async (e) => {
+        e.stopPropagation();
+        if (!confirm("删除该会话？")) return;
+        const r = await fetch("/api/session?file=" + encodeURIComponent(s.file), { method: "DELETE" });
+        if (r.ok) {
+          if (AppState.currentSessionFile === s.file) closeHistory();
+          loadSessions();
+        }
+      };
+      div.onclick = () => openSession(s.file);
+      box.appendChild(div);
+    });
   });
 }
 
 /* ═══════════ 文件面板 ═══════════ */
 function showTab(tab) {
+  // 两个 pane 均为 flex-column；只切换显示/隐藏，避免布局变形
   document.getElementById("pane-sessions").style.display = tab === "sessions" ? "flex" : "none";
   document.getElementById("pane-files").style.display = tab === "files" ? "flex" : "none";
   document.getElementById("tab-sessions").classList.toggle("active", tab === "sessions");
   document.getElementById("tab-files").classList.toggle("active", tab === "files");
-  if (tab === "files") loadFiles();
+  if (tab === "files" && !document.getElementById("filetree").dataset.loaded) {
+    loadFiles();
+  }
 }
-async function loadFiles(dir) {
-  const tree = document.getElementById("filetree");
-  tree.innerHTML = '<div style="color:var(--faint);font-size:11px;padding:8px;">加载中…</div>';
+
+/* 文件树：懒加载展开（目录 ▶ 点击展开/折叠子层） */
+let treePathCache = new Set();
+async function loadFiles(dir, container, depth) {
+  const rootContainer = container || document.getElementById("filetree");
+  if (!container) {
+    treePathCache.clear();
+    rootContainer.dataset.loaded = "1";
+    rootContainer.innerHTML = '<div style="color:var(--faint);font-size:11px;padding:8px;">加载中…</div>';
+  }
   const ws = (await (await fetch("/api/workspace")).json()).workspace;
   const target = dir || ws;
   const data = await (await fetch("/api/fs/browse?path=" + encodeURIComponent(target))).json();
   const fl = await (await fetch("/api/files?path=" + encodeURIComponent(target))).json();
-  tree.innerHTML = "";
-  if (data.parent !== null && !data.drives) {
+  if (!container) rootContainer.innerHTML = "";
+  const d = depth || 0;
+  const pad = 8 + d * 14;
+  if (data.parent !== null && !data.drives && d === 0) {
     const up = document.createElement("div");
     up.className = "file-item";
     up.textContent = "↰ ..";
-    up.onclick = () => loadFiles(data.parent);
-    tree.appendChild(up);
+    up.style.paddingLeft = pad + "px";
+    up.onclick = () => loadFiles(data.parent, rootContainer, 0);
+    rootContainer.appendChild(up);
   }
-  data.dirs.forEach(d => {
-    const b = document.createElement("div");
-    b.className = "folder-item";
-    b.textContent = "📁 " + d.split(/[\\/]/).pop();
-    b.onclick = () => loadFiles(d);
-    tree.appendChild(b);
+  data.dirs.forEach(di => {
+    const row = document.createElement("div");
+    row.style.paddingLeft = pad + "px";
+    row.className = "folder-item";
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.gap = "6px";
+    const arrow = document.createElement("span");
+    arrow.textContent = "▸";
+    arrow.style.cssText = "font-size:9px;color:var(--faint);transition:transform .15s;width:12px;";
+    row.appendChild(arrow);
+    const label = document.createElement("span");
+    label.textContent = "📁 " + di.split(/[\\/]/).pop();
+    label.style.flex = "1";
+    label.style.overflow = "hidden";
+    label.style.textOverflow = "ellipsis";
+    label.style.whiteSpace = "nowrap";
+    row.appendChild(label);
+    let expanded = false, subContainer = null;
+    row.onclick = async () => {
+      if (!expanded) {
+        arrow.textContent = "▾";
+        subContainer = document.createElement("div");
+        subContainer.style.marginLeft = "10px";
+        row.parentNode.insertBefore(subContainer, row.nextSibling);
+        await loadFiles(di, subContainer, d + 1);
+        expanded = true;
+      } else {
+        arrow.textContent = "▸";
+        if (subContainer) { subContainer.remove(); subContainer = null; }
+        expanded = false;
+      }
+    };
+    rootContainer.appendChild(row);
   });
   fl.files.slice(0, 50).forEach(f => {
     const b = document.createElement("div");
     b.className = "file-item";
+    b.style.paddingLeft = pad + "px";
     b.textContent = "📄 " + f;
     b.onclick = () => viewFile(target + "\\" + f);
-    tree.appendChild(b);
+    rootContainer.appendChild(b);
   });
   if (fl.files.length > 50) {
     const more = document.createElement("div");
     more.style.cssText = "font-size:11px;color:var(--faint);padding:8px;";
     more.textContent = "... 还有 " + (fl.files.length - 50) + " 个文件";
-    tree.appendChild(more);
+    rootContainer.appendChild(more);
   }
 }
 async function viewFile(path) {
@@ -940,8 +1012,36 @@ function closeFileViewer() { document.getElementById("fileModal").classList.remo
 /* ═══════════ 打开文件夹 ═══════════ */
 let browseCurrent = "";
 async function openFolderDialog() {
+  // 优先系统原生文件夹选择对话框（后端 PowerShell），失败/取消回退自绘浏览器
+  try {
+    const resp = await fetch("/api/fs/pick", { method: "POST" });
+    const data = await resp.json();
+    if (data.ok && data.path) {
+      await applyWorkspace(data.path);
+      return;
+    }
+  } catch (e) { /* fallback */ }
   document.getElementById("folderModal").classList.add("show");
   browseFolder("");
+}
+async function applyWorkspace(path) {
+  const resp = await fetch("/api/workspace", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path })
+  });
+  const data = await resp.json();
+  if (data.ok) {
+    document.getElementById("ws").textContent = "📂 " + data.workspace;
+    const workspaceName = data.workspace.split(/[\\/]/).pop();
+    inputEl.placeholder = `在工作区 "${workspaceName}" 中输入任务…`;
+    closeFolderDialog();
+    loadSessions();
+    loadFiles();
+    add("turn", "📂 工作区已切换: " + data.workspace);
+  } else {
+    add("error", data.detail || "切换失败");
+  }
 }
 function closeFolderDialog() { document.getElementById("folderModal").classList.remove("show"); }
 async function browseFolder(path) {
@@ -964,22 +1064,7 @@ async function upFolder() {
   browseFolder(parent);
 }
 async function chooseFolder() {
-  const resp = await fetch("/api/workspace", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: browseCurrent })
-  });
-  const data = await resp.json();
-  if (data.ok) {
-    document.getElementById("ws").textContent = "📂 " + data.workspace;
-    const workspaceName = data.workspace.split(/[\\/]/).pop();
-    inputEl.placeholder = `在工作区 "${workspaceName}" 中输入任务…`;
-    closeFolderDialog();
-    loadSessions();
-    add("turn", "📂 工作区已切换: " + data.workspace);
-  } else {
-    add("error", data.detail || "切换失败");
-  }
+  if (browseCurrent) await applyWorkspace(browseCurrent);
 }
 async function loadWorkspace() {
   const r = await (await fetch("/api/workspace")).json();
@@ -999,9 +1084,14 @@ async function loadModels() {
 }
 function renderModelDropdown() {
   const dropdown = document.getElementById("modelDropdown");
+  const list = document.getElementById("modelList");
+  list.innerHTML = "";
   dropdown.innerHTML = "";
   if (!AppState.models.length) return;
   AppState.models.forEach(m => {
+    const opt = document.createElement("option");
+    opt.value = m;
+    list.appendChild(opt);
     const div = document.createElement("div");
     div.className = "model-item" + (m === document.getElementById("model").value ? " selected" : "");
     div.textContent = m;
@@ -1014,12 +1104,25 @@ function renderModelDropdown() {
   });
 }
 async function saveModelOnly(m) {
+  if (!m) return;
   await fetch("/api/config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: m })
   }).catch(() => {});
 }
+// header 模型输入：可直接输入，失焦/回车保存
+document.getElementById("model").addEventListener("change", () => {
+  const v = document.getElementById("model").value.trim();
+  if (v) saveModelOnly(v);
+});
+document.getElementById("model").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    const v = document.getElementById("model").value.trim();
+    if (v) { saveModelOnly(v); document.getElementById("model").blur(); }
+  }
+});
 document.getElementById("model").addEventListener("focus", () => {
   if (AppState.models.length) {
     renderModelDropdown();
@@ -1040,22 +1143,16 @@ document.addEventListener("click", (e) => {
 async function openConfigModal() {
   const cfgResp = await fetch("/api/config");
   const cfg = await cfgResp.json();
-  const sel = document.getElementById("cfg-model");
-  sel.innerHTML = "";
   if (!AppState.models.length) await loadModels();
+  // 填充 datalist 选项
+  const dl = document.getElementById("cfgModelList");
+  dl.innerHTML = "";
   AppState.models.forEach(m => {
     const opt = document.createElement("option");
     opt.value = m;
-    opt.textContent = m;
-    sel.appendChild(opt);
+    dl.appendChild(opt);
   });
-  if (cfg.model && !AppState.models.includes(cfg.model)) {
-    const opt = document.createElement("option");
-    opt.value = cfg.model;
-    opt.textContent = cfg.model + "（当前）";
-    sel.appendChild(opt);
-  }
-  sel.value = cfg.model || AppState.models[0] || "";
+  document.getElementById("cfg-model").value = cfg.model || AppState.models[0] || "";
   document.getElementById("cfg-baseurl").value = cfg.base_url || "";
   document.getElementById("cfg-apikey").value = "";
   document.getElementById("cfg-keyhint").textContent =
@@ -1064,10 +1161,11 @@ async function openConfigModal() {
 }
 function closeConfigModal() { document.getElementById("configModal").classList.remove("show"); }
 async function saveConfig() {
-  const model = document.getElementById("cfg-model").value;
+  const model = document.getElementById("cfg-model").value.trim();
   const baseUrl = document.getElementById("cfg-baseurl").value.trim();
   const apiKey = document.getElementById("cfg-apikey").value.trim();
-  const body = { model };
+  const body = {};
+  if (model) body.model = model;
   if (baseUrl) body.base_url = baseUrl;
   if (apiKey) body.api_key = apiKey;
   const resp = await fetch("/api/config", {
@@ -1077,9 +1175,9 @@ async function saveConfig() {
   });
   const data = await resp.json();
   if (resp.ok) {
-    document.getElementById("model").value = data.model || model;
+    if (model) document.getElementById("model").value = model;
     closeConfigModal();
-    add("turn", "⚙ 配置已保存: 模型=" + (data.model || model) +
+    add("turn", "⚙ 配置已保存: 模型=" + (data.model || model || "不变") +
       (baseUrl ? " | Base URL=" + baseUrl : "") + (apiKey ? " | API Key 已更新" : ""));
   } else {
     add("error", data.detail || "保存配置失败");
@@ -1313,6 +1411,38 @@ async function execLine(line) {
       return;
     }
     listenEvents();
+  } else if (cmd === "/compact") {
+    const resp = await fetch("/api/compact", { method: "POST" });
+    const d = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      add("answer", "✅ 上下文已压缩: " + d.before + " → " + d.after + " 条消息" +
+        "\n（下次 /resume 恢复时使用压缩后的历史）");
+    } else {
+      add("error", d.detail || "压缩失败");
+    }
+  } else if (cmd === "/history") {
+    const d = await (await fetch("/api/context")).json();
+    const msgs = d.messages || [];
+    const card = add("answer", "");
+    if (d.running) card.innerHTML = "<b>（运行中，显示最近消息）</b><br>";
+    card.innerHTML += msgs.length
+      ? msgs.map(m => "<span style='color:" +
+          (m.role === "user" ? "var(--accent)" : m.role === "tool" ? "var(--ok)" : "var(--muted)") +
+          "'>[" + escHtml(m.role) + "]</span> " + escHtml(m.content)).join("<br>")
+      : "没有历史消息——先运行一次任务";
+    card.style.whiteSpace = "pre-wrap";
+  } else if (cmd === "/trace") {
+    const d = await (await fetch("/api/trace")).json();
+    const entries = d.entries || [];
+    const card = add("answer", "");
+    card.innerHTML = entries.length
+      ? "<b>最近一次运行的工具追踪 (" + entries.length + " 条):</b><br>" +
+        entries.map(e => {
+          const t = e.tool || e.name || "?";
+          return "  step " + (e.step || e.turn || "?") + "  " + escHtml(t);
+        }).join("<br>")
+      : "没有追踪数据——先运行一次任务";
+    card.style.whiteSpace = "pre-wrap";
   } else if (cmd === "/clear") {
     feed.innerHTML = "";
     AppState.currentTurnEl = null;

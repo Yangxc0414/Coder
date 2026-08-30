@@ -41,14 +41,16 @@ class SessionJournal:
             When False (default), truncate and start a fresh session.
     """
 
-    def __init__(self, path: str | Path, append: bool = False) -> None:
+    def __init__(self, path: str | Path, append: bool = False,
+                 workspace: str | Path | None = None) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if append:
             self._fh = open(self.path, "a", encoding="utf-8")
         else:
             self._fh = open(self.path, "w", encoding="utf-8")
-            self._write({"type": "meta", "created": time.time(), "version": 1})
+            self._write({"type": "meta", "created": time.time(), "version": 1,
+                         "workspace": str(workspace) if workspace else None})
 
     def log_message(self, message: dict[str, Any]) -> None:
         """Mirror one conversation message."""

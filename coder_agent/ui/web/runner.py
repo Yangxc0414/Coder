@@ -50,6 +50,9 @@ class RunManager:
         self._lock = threading.Lock()
         self._final_answer: str | None = None
         self._error: str | None = None
+        self._last_messages: list[dict] = []
+        self._last_trace = None
+        self._journal = None
         self.model = "agnes-2.5-flash"
         self.mode = "full"
         # API 配置：优先读取 ~/.coder_config.json，其次环境变量
@@ -83,19 +86,32 @@ class RunManager:
 
     def tool_specs(self) -> list[dict]:
         """当前工作区下模型可用的工具清单（/tools 命令数据源）。"""
-        agent = self._agent_factory()
+        from coder_agent.mode import AgentMode
+        registry = create_default_registry(self.workspace, AgentMode(self.mode))
         specs = []
-        for schema in agent.registry.list_tools():
+        for schema in registry.list_tools():
             fn = schema.get("function", {})
             specs.append({"name": fn.get("name", "?"),
                           "description": (fn.get("description") or "")[:100]})
         return specs
 
-    def _default_agent_factory(self):
+    def _default_agent_factory(self, resume_path: str | None = None):
         from coder_agent.agent import Agent
         from coder_agent.verifier import Verifier
         from coder_agent.mode import AgentMode
-        from coder_agent.ui.cli.repl import CoderRepl  # 复用注册逻辑
+        from coder_agent.journal import SessionJournal
+        import datetime
+
+        # Web 运行同样落盘 journal（与 CLI 同目录），resume 时追加
+        if resume_path:
+            self._journal = SessionJournal(resume_path, append=True,
+                                           workspace=self.workspace)
+        else:
+            stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self._journal = SessionJournal(
+                Path.home() / ".coder_sessions" / f"session_{stamp}_{0}.jsonl",
+                workspace=self.workspace)
+
         registry = create_default_registry(self.workspace, AgentMode(self.mode))
         return Agent(
             llm_client=LLMClient(model=self.model, api_key=self.api_key,
@@ -103,6 +119,7 @@ class RunManager:
             registry=registry, workspace=self.workspace,
             mode=AgentMode(self.mode),
             verifier=Verifier(self.workspace, task=""),
+            journal=self._journal,
         )
 
     @property
@@ -132,8 +149,9 @@ class RunManager:
 
     def _run(self, task: str, resume_path: str | None = None) -> None:
         try:
-            agent = self._agent_factory()
+            agent = self._agent_factory(resume_path)
             self._agent = agent
+            self._journal = getattr(self, "_journal", None)
             if self._pending_goal:
                 agent.state.task_goal = self._pending_goal  # 注入系统提示
             if resume_path:
@@ -169,8 +187,57 @@ class RunManager:
             self._error = f"{type(e).__name__}: {e}"
             self._emit("error", error=self._error)
         finally:
+            # 保存最近一次的消息/追踪快照（供 /history /compact /trace）
+            if self._agent is not None:
+                self._last_messages = list(getattr(self._agent, "messages", []) or [])
+                self._last_trace = getattr(self._agent, "trace", None)
+            try:
+                if getattr(self, "_journal", None) is not None:
+                    self._journal.close()
+            except OSError:
+                pass
             self._emit("done")
             self._agent = None
+
+    def agent_summary(self, n: int = 10) -> list[dict]:
+        """最近一次运行的最近 n 条消息摘要（/history 数据源）。"""
+        msgs = getattr(self, "_last_messages", []) or []
+        out = []
+        for i, m in enumerate(msgs[-n:]):
+            role = m.get("role", "?")
+            content = (m.get("content") or "")[:120]
+            if m.get("tool_calls"):
+                names = [tc.get("function", {}).get("name", "?")
+                         for tc in m.get("tool_calls", [])]
+                content = content or f"[工具调用: {', '.join(names)}]"
+            out.append({"index": i, "role": role, "content": content})
+        return out
+
+    def compact_last(self, keep: int = 10) -> dict | None:
+        """手动压缩最近一次运行的消息历史（保留最近 keep 条）。
+
+        对应 CLI 的 /compact 语义；运行中不可压缩。
+        """
+        if self.running:
+            return {"ok": False, "error": "任务运行中，无法压缩"}
+        msgs = getattr(self, "_last_messages", None)
+        if not msgs:
+            return {"ok": False, "error": "尚无历史消息可压缩"}
+        n = len(msgs)
+        if n <= keep:
+            return {"ok": False, "error": f"无需压缩（{n} 条 ≤ {keep} 条阈值）"}
+        self._last_messages = msgs[-keep:]
+        return {"ok": True, "before": n, "after": len(self._last_messages)}
+
+    def trace_summary(self) -> list[dict] | None:
+        """最近一次运行的 trace 摘要（/trace 数据源）。"""
+        trace = getattr(self, "_last_trace", None)
+        if trace is None:
+            return None
+        try:
+            return trace.get_entries()
+        except Exception:
+            return None
 
     def abort(self) -> None:
         if self._agent is not None:

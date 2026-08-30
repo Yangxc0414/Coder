@@ -103,9 +103,12 @@ def api_sessions():
             task_preview = first_user
             if len(user_messages) > 1:
                 task_preview += f" ... (+{len(user_messages)-1} more)"
+            workspace = (journal.get("meta") or {}).get("workspace")
         except Exception:
             task_preview = "?"
-        out.append({"file": str(f), "name": f.name, "task": task_preview})
+            workspace = None
+        out.append({"file": str(f), "name": f.name, "task": task_preview,
+                    "workspace": workspace})
     return {"sessions": out}
 
 
@@ -220,6 +223,58 @@ def api_files(path: str = ""):
     files = [f.name for f in sorted(target.iterdir())
              if f.is_file() and not f.name.startswith(".")]
     return {"files": files, "dir": str(target)}
+
+
+@app.post("/api/fs/pick")
+def api_fs_pick():
+    """弹出系统原生文件夹选择对话框（PowerShell FolderBrowserDialog）。
+
+    浏览器出于安全无法直接打开系统目录选择器，这里通过后端进程弹出。
+    用户取消时返回 ok=False，前端可回退到自绘浏览器。
+    """
+    import subprocess
+    ps_script = (
+        "Add-Type -AssemblyName System.Windows.Forms;"
+        "$f = New-Object System.Windows.Forms.FolderBrowserDialog;"
+        "$f.Description = '选择工作区文件夹';"
+        "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) "
+        "{ Write-Output $f.SelectedPath } else { Write-Output '' }"
+    )
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-STA", "-Command", ps_script],
+            capture_output=True, text=True, timeout=180)
+        picked = (r.stdout or "").strip()
+        if picked and os.path.isdir(picked):
+            return {"ok": True, "path": picked}
+        return {"ok": False, "detail": "未选择文件夹"}
+    except Exception as e:
+        return {"ok": False, "detail": f"系统对话框不可用: {e}"}
+
+
+# ── 运行上下文 / 压缩 / 追踪（对应 CLI 的 /history /compact /trace）──────
+
+
+@app.get("/api/context")
+def api_context():
+    m = get_manager()
+    return {"running": m.running, "messages": m.agent_summary()}
+
+
+@app.post("/api/compact")
+def api_compact():
+    m = get_manager()
+    result = m.compact_last()
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result.get("error"))
+    return result
+
+
+@app.get("/api/trace")
+def api_trace():
+    m = get_manager()
+    entries = m.trace_summary()
+    return {"entries": entries or []}
 
 
 @app.get("/api/status")
@@ -352,6 +407,9 @@ def api_commands():
             {"name": "/sessions", "desc": "列出会话（含任务预览）", "hasArgs": False},
             {"name": "/resume", "desc": "恢复会话（无参=最新；或输入序号）", "hasArgs": True,
              "argHint": "<会话序号>，空=最新"},
+            {"name": "/compact", "desc": "手动压缩最近一次运行的上下文", "hasArgs": False},
+            {"name": "/history", "desc": "显示最近一次运行的最近消息", "hasArgs": False},
+            {"name": "/trace", "desc": "显示最近一次运行的工具追踪摘要", "hasArgs": False},
             {"name": "/clear", "desc": "清空对话显示", "hasArgs": False},
         ]
     }

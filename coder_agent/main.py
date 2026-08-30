@@ -167,9 +167,9 @@ def main() -> None:
     trace_path = Path(args.trace_output) if args.trace_output else None
     journal = None
     if args.resume:
-        journal = SessionJournal(args.resume, append=True)
+        journal = SessionJournal(args.resume, append=True, workspace=workspace)
     elif args.session_output:
-        journal = SessionJournal(args.session_output)
+        journal = SessionJournal(args.session_output, workspace=workspace)
 
     agent = Agent(
         llm_client=llm, registry=registry, workspace=workspace,

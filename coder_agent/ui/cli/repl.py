@@ -353,7 +353,7 @@ class CoderRepl:
         self._console.print(f"[bold cyan]→ {task}[/bold cyan]")
         self._console.print()
 
-        journal = SessionJournal(self._next_session_path())
+        journal = SessionJournal(self._next_session_path(), workspace=self.workspace)
         agent = self._build_agent(task, journal=journal)
         if self.state.goal:
             agent.state.task_goal = self.state.goal  # 注入系统提示（State.Goal）
@@ -411,7 +411,7 @@ class CoderRepl:
             self._console.print(f"[red]✗ Journal has no messages: {path}[/red]")
             return
 
-        journal = SessionJournal(resolved_path, append=True)
+        journal = SessionJournal(resolved_path, append=True, workspace=self.workspace)
         agent = self._build_agent(instruction, journal=journal)
         agent.messages = restored["messages"]
         replay_state(restored["messages"], agent.state)
