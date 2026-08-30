@@ -181,14 +181,17 @@ def api_tools():
 def api_models():
     import urllib.request
 
-    base = (os.getenv("OPENAI_BASE_URL") or "https://api.agnes-ai.cn/v1").rstrip("/")
-    key = os.getenv("OPENAI_API_KEY") or ""
+    # 优先使用用户配置（~/.coder_config.json），其次环境变量
+    m = get_manager()
+    base = (m.base_url or os.getenv("OPENAI_BASE_URL")
+            or "https://api.agnes-ai.cn/v1").rstrip("/")
+    key = m.api_key or os.getenv("OPENAI_API_KEY") or ""
     try:
         req = urllib.request.Request(
             f"{base}/models", headers={"Authorization": f"Bearer {key}"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
-        models = sorted(str(m.get("id")) for m in data.get("data", []) if m.get("id"))
+        models = sorted(str(md.get("id")) for md in data.get("data", []) if md.get("id"))
         return {"models": models}
     except Exception:
         return {"models": []}

@@ -1321,6 +1321,7 @@ async function saveConfig() {
   const data = await resp.json();
   if (resp.ok) {
     if (model) document.getElementById("model").value = model;
+    await loadModels();  // 配置更新后重新拉取模型列表（下拉/自定义入口可用）
     closeConfigModal();
     const t = activeTab();
     if (t) addTabMsg(t, "turn", "⚙ 配置已保存: 模型=" + (data.model || model || "不变") +
