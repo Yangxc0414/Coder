@@ -303,9 +303,8 @@
   <header>
     <div class="header-group">
       <span class="header-label">模式</span>
-      <select id="mode" title="full: 完整执行 | goal: 目标驱动 | plan: 先规划再执行 | dry-run: 只预览不落盘">
+      <select id="mode" title="full: 完整执行 | plan: 先规划再执行 | dry-run: 只预览不落盘（目标请用 /goal 命令设置）">
         <option value="full">full</option>
-        <option value="goal">goal</option>
         <option value="plan">plan</option>
         <option value="dry-run">dry-run</option>
       </select>
@@ -642,12 +641,11 @@ const SUGGESTS = [
   "给项目根目录写一个简洁的 README.md",
   "检查代码中是否有明显的 bug 并修复",
 ];
-// 与框架 MODE_DESCRIPTIONS 严格对应（coder_agent/mode.py）
+// 执行模式（与框架 MODE_DESCRIPTIONS 对应；goal 不是模式，用 /goal 设置目标）
 const MODES = [
-  { name: "goal", desc: "目标驱动：规划并执行以完成任务" },
+  { name: "full", desc: "完全访问：绕过策略拦截（路径安全仍强制）" },
   { name: "plan", desc: "只规划：分析代码库并输出执行计划（只读）" },
   { name: "dry-run", desc: "预演：展示将改动什么，不修改文件" },
-  { name: "full", desc: "完全访问：绕过策略拦截（路径安全仍强制）" },
 ];
 function renderWelcome(tab) {
   if (tab.feedEl.children.length) return;
@@ -2150,11 +2148,11 @@ async function execLine(line) {
       addTabMsg(tab, "answer", "模型已切换: " + arg + "（下次运行生效）");
     }
   } else if (cmd === "/mode") {
-    if (["full", "goal", "plan", "dry-run"].includes(arg)) {
+    if (["full", "plan", "dry-run"].includes(arg)) {
       document.getElementById("mode").value = arg;
       addTabMsg(tab, "answer", "模式已切换: " + arg);
     } else addTabMsg(tab, "answer", "当前模式: " + document.getElementById("mode").value +
-      "（用法: /mode full|goal|plan|dry-run）");
+      "（用法: /mode full|plan|dry-run；设置目标请用 /goal <描述>）");
   } else if (cmd === "/goal") {
     // 会话级目标：只作用于当前 tab（每次运行注入系统提示）
     if (arg === "clear") {
