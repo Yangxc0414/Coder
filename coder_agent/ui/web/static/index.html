@@ -494,6 +494,7 @@ function createTab(title) {
     id, title: title || "新会话",
     runId: null, es: null, running: false,
     goal: AppState.sessionGoal || "",  // 会话级目标（新会话继承全局默认）
+    mode: document.getElementById("mode").value,  // 会话级模式（继承当前）
     queue: [],  // 输入队列（运行中提交的任务排队，完成后自动执行）
     turnEl: null, turnStep: null, streamEl: null, pendingEl: null,
     stateInfo: null, endedShown: false,
@@ -545,6 +546,9 @@ function switchTab(id) {
     t.btn.classList.toggle("active", t.id === id);
   });
   Tabs.active = tab;
+  // 会话级模式：select 跟随当前 tab（组件化 per-tab）
+  document.getElementById("mode").value = tab.mode || "full";
+  updateModeChips();
   // 同步运行状态 UI
   document.getElementById("state").textContent = tab.running ? "运行中…" : "空闲";
   document.getElementById("statusDot").className = "status-dot" + (tab.running ? " running" : "");
@@ -711,30 +715,33 @@ function renderWelcome(tab) {
 function bindModeChips(scope) {
   const chips = scope.querySelectorAll("#modeChips .chip");
   if (!chips.length) return;
-  const sync = () => {
-    const cur = document.getElementById("mode").value;
-    chips.forEach(ch => {
-      const active = ch.dataset.mode === cur;
-      ch.style.cssText = active
-        ? "border-color:var(--accent);color:var(--accent);background:var(--user-bg);"
-        : "";
-    });
-  };
   chips.forEach(ch => {
     ch.onclick = () => {
       const mode = ch.dataset.mode;
-      document.getElementById("mode").value = mode;  // 与 header select 同步
-      sync();
       const t = activeTab();
+      if (t) t.mode = mode;  // 会话级模式
+      document.getElementById("mode").value = mode;
+      updateModeChips();
       const desc = (MODES.find(m => m.name === mode) || {}).desc || "执行模式";
       if (t) addTabMsg(t, "turn", "⚙ 模式已切换: " + mode + "（" + desc + "）");
     };
   });
-  sync();
-  // header select 手动切换时同步 chips 高亮
+  updateModeChips();
+  // header select 手动切换时同步当前 tab 模式 + chips 高亮
   document.getElementById("mode").onchange = () => {
-    sync();
+    const t = activeTab();
+    if (t) t.mode = document.getElementById("mode").value;
+    updateModeChips();
   };
+}
+
+function updateModeChips() {
+  const cur = document.getElementById("mode").value;
+  document.querySelectorAll("#modeChips .chip").forEach(ch => {
+    ch.style.cssText = ch.dataset.mode === cur
+      ? "border-color:var(--accent);color:var(--accent);background:var(--user-bg);"
+      : "";
+  });
 }
 
 /* ═══════════ Mini-Markdown ═══════════ */
@@ -1169,7 +1176,7 @@ async function submitTask(task) {
   setRunning(tab, true);
   tab.title = task.length > 18 ? task.slice(0, 18) + "…" : task;
   tab.btn.querySelector(".t-title").textContent = tab.title;
-  const mode = document.getElementById("mode").value;
+  const mode = tab.mode || document.getElementById("mode").value;  // 会话级模式
   const model = document.getElementById("model").value;
   const endpoint = isHistoryContinue ? "/api/resume" : "/api/run";
   const resp = await fetch(endpoint, {
@@ -2226,9 +2233,11 @@ async function execLine(line) {
     }
   } else if (cmd === "/mode") {
     if (["full", "plan", "dry-run"].includes(arg)) {
+      tab.mode = arg;  // 会话级模式
       document.getElementById("mode").value = arg;
-      addTabMsg(tab, "answer", "模式已切换: " + arg);
-    } else addTabMsg(tab, "answer", "当前模式: " + document.getElementById("mode").value +
+      updateModeChips();
+      addTabMsg(tab, "answer", "模式已切换: " + arg + "（仅当前会话）");
+    } else addTabMsg(tab, "answer", "当前模式: " + (tab.mode || document.getElementById("mode").value) +
       "（用法: /mode full|plan|dry-run；设置目标请用 /goal <描述>）");
   } else if (cmd === "/goal") {
     // 会话级目标：设置后立即以该描述作为任务开始执行
