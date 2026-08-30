@@ -197,6 +197,28 @@ class RunManager:
             session.agent = agent
             if self._pending_goal:
                 agent.state.task_goal = self._pending_goal  # 注入系统提示
+
+            def on_stream(delta: str):
+                # 逐 token 流式输出（前端打字机效果）
+                self._emit(run_id, "stream", delta=delta)
+
+            def on_toolstart(e):
+                # 工具开始执行（前端显示"正在调用…"）
+                args = e.data.get("args") or {}
+                arg_str = ""
+                try:
+                    if isinstance(args, dict):
+                        arg_str = str(args.get("path")
+                                      or args.get("command")
+                                      or args.get("pattern") or "")
+                except Exception:
+                    arg_str = ""
+                self._emit(run_id, "toolstart", tool=e.data.get("tool_name", "?"),
+                           target=arg_str[:120])
+
+            agent.stream_callback = on_stream
+            agent.hooks.register("PRE_TOOL_USE", on_toolstart)
+
             if resume_path:
                 from coder_agent.journal import load_journal, replay_state
                 restored = load_journal(resume_path)

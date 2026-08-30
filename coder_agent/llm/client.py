@@ -22,23 +22,6 @@ def _user_config() -> dict:
 
 _USER_CFG = _user_config()
 
-# Try to use legacy SSL context for older OpenSSL versions
-# (Agnes API may require TLS 1.3 which old OpenSSL doesn't support)
-try:
-    import ssl as _ssl
-    # 优先：默认 context + 不校验证书（兼容多数 OpenAI 兼容端点）
-    _ssl_ctx = _ssl.create_default_context()
-    _ssl_ctx.check_hostname = False
-    _ssl_ctx.verify_mode = _ssl.CERT_NONE
-    _SSL_CONTEXT = _ssl_ctx
-except Exception:
-    try:
-        import ssl as _ssl
-        _ssl_ctx = _ssl._create_legacy_context()
-        _SSL_CONTEXT = _ssl_ctx
-    except Exception:
-        _SSL_CONTEXT = None
-
 
 @dataclass
 class LLMResponse:
@@ -77,22 +60,95 @@ class LLMClient:
         if self.base_url:
             client_kwargs["base_url"] = self.base_url
 
-        # Patch SSL if needed for older OpenSSL
-        if _SSL_CONTEXT is not None:
-            import httpx as _httpx
-            _ssl_transport = _httpx.HTTPTransport(verify=_SSL_CONTEXT)
-            _ssl_hx_client = _httpx.Client(transport=_ssl_transport, timeout=60.0)
-            self._client = OpenAI(**client_kwargs, http_client=_ssl_hx_client)
-        else:
-            self._client = OpenAI(**client_kwargs)
+        # 使用 SDK 默认 transport（自定义 SSL context 会导致部分端点 401）
+        import httpx as _httpx
+        self._client = OpenAI(**client_kwargs,
+                              http_client=_httpx.Client(timeout=60.0))
 
     def chat(
         self,
         messages: list[dict],
         tools: list[dict] | None = None,
         max_tokens: int = 4096,
+        on_token: Any = None,
     ) -> LLMResponse:
-        """Send a chat completion request and return a structured response."""
+        """Send a chat completion request and return a structured response.
+
+        Args:
+            on_token: Optional callback receiving each content token delta as
+                it arrives (streaming mode). When provided, the request is
+                streamed and the callback fires per chunk; the returned
+                LLMResponse still contains the full accumulated content.
+                Tool-call deltas are aggregated internally.
+        """
+        if on_token is None:
+            return self._chat_once(messages, tools, max_tokens)
+        # 流式模式：逐块回调内容，聚合 tool_calls
+        params: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if tools:
+            params["tools"] = tools
+            params["tool_choice"] = "auto"
+        try:
+            stream = self._client.chat.completions.create(**params)
+            content_parts: list[str] = []
+            tool_calls: dict[int, dict[str, str]] = {}
+            finish_reason: str | None = None
+            usage: dict[str, int] | None = None
+            for chunk in stream:
+                if not chunk.choices:
+                    if getattr(chunk, "usage", None):
+                        usage = {
+                            "prompt_tokens": chunk.usage.prompt_tokens,
+                            "completion_tokens": chunk.usage.completion_tokens,
+                        }
+                    continue
+                choice = chunk.choices[0]
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+                delta = choice.delta
+                if delta and delta.content:
+                    content_parts.append(delta.content)
+                    on_token(delta.content)
+                if delta and delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        entry = tool_calls.setdefault(
+                            tc.index, {"id": "", "name": "", "arguments": ""})
+                        if tc.id:
+                            entry["id"] = tc.id
+                        if tc.function and tc.function.name:
+                            entry["name"] = tc.function.name
+                        if tc.function and tc.function.arguments:
+                            entry["arguments"] += tc.function.arguments
+            tc_list = None
+            if tool_calls:
+                tc_list = [
+                    {"id": v["id"], "name": v["name"],
+                     "arguments": v["arguments"]}
+                    for _, v in sorted(tool_calls.items())
+                ]
+            return LLMResponse(
+                content="".join(content_parts) or None,
+                tool_calls=tc_list,
+                finish_reason=finish_reason,
+                usage=usage,
+            )
+        except Exception:
+            # 流式失败时降级为非流式（保证可用性）
+            return self._chat_once(messages, tools, max_tokens)
+
+    def _chat_once(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None,
+        max_tokens: int,
+    ) -> LLMResponse:
+        """非流式单次请求。"""
         params: dict[str, Any] = {
             "model": self.model,
             "messages": messages,

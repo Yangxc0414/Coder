@@ -100,6 +100,14 @@
   .think { color: var(--muted); font-size: 12px; white-space: pre-wrap; border-left: 2px solid var(--border2); padding-left: 10px; margin: 4px 0; }
   .turn { align-self: center; color: var(--faint); font-size: 11px; padding: 4px 12px; }
   .error { align-self: flex-start; background: var(--danger); color: #fff; border-radius: 8px; padding: 10px 14px; font-size: 12px; }
+  /* 流式输出（打字机光标） */
+  .stream-box { align-self: flex-start; color: var(--accent); font-size: 12px; font-family: Consolas, monospace; white-space: pre-wrap; max-width: 85%; line-height: 1.6; }
+  .stream-box::after { content: "▍"; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  /* 工具调用进行中 */
+  .tool-pending { align-self: flex-start; color: var(--muted); font-size: 12px; font-family: Consolas, monospace; padding: 7px 12px; border: 1px dashed var(--border2); border-radius: 8px; display: flex; gap: 8px; align-items: center; }
+  .tool-pending .spin { animation: spin 1.2s linear infinite; display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .msg-ops { position: absolute; top: -10px; right: 6px; display: none; gap: 4px; z-index: 5; }
   .message:hover .msg-ops { display: flex; }
   .msg-ops button { background: var(--bg3); border: 1px solid var(--border); color: var(--muted); border-radius: 4px; font-size: 10px; padding: 2px 7px; cursor: pointer; box-shadow: 0 2px 6px var(--shadow); }
@@ -424,7 +432,7 @@ function createTab(title) {
   const tab = {
     id, title: title || "新会话",
     runId: null, es: null, running: false,
-    turnEl: null,
+    turnEl: null, streamEl: null, pendingEl: null,
     stats: { tokens: 0, steps: 0, tools: {}, writes: [], reads: [] },
     viewingHistory: false, sessionFile: null, sessionData: null,
   };
@@ -650,8 +658,49 @@ function trackTool(tab, ev) {
 }
 
 /* ═══════════ SSE 事件渲染（按 tab 路由） ═══════════ */
+function appendStream(tab, delta) {
+  if (!tab.streamEl) {
+    const el = document.createElement("div");
+    el.className = "stream-box";
+    if (tab.turnEl) tab.turnEl.querySelector(".turn-body").appendChild(el);
+    else tab.feedEl.appendChild(el);
+    tab.streamEl = el;
+    scrollFeedEl(tab.feedEl, true);
+  }
+  tab.streamEl.textContent += delta;
+  scrollFeedEl(tab.feedEl, nearBottom(tab.feedEl));
+}
+function finalizeStream(tab) {
+  // 流式输出结束：内容转为正式 think 块
+  if (tab.streamEl && tab.streamEl.textContent.trim()) {
+    const div = document.createElement("div");
+    div.className = "think";
+    div.textContent = "│ " + tab.streamEl.textContent;
+    if (tab.streamEl.parentNode) tab.streamEl.parentNode.insertBefore(div, tab.streamEl);
+    tab.streamEl.remove();
+  }
+  tab.streamEl = null;
+}
+function clearPending(tab) {
+  if (tab.pendingEl) { tab.pendingEl.remove(); tab.pendingEl = null; }
+}
 function onEvent(ev, tab) {
-  if (ev.kind === "text") {
+  if (ev.kind === "stream") {
+    appendStream(tab, ev.delta || "");
+  } else if (ev.kind === "toolstart") {
+    // 工具开始执行：把思考流式内容收尾，显示"正在调用…"
+    finalizeStream(tab);
+    clearPending(tab);
+    const p = document.createElement("div");
+    p.className = "tool-pending";
+    p.innerHTML = '<span class="spin">⏳</span> 正在调用 <b style="color:var(--accent);">' +
+      escHtml(ev.tool) + '</b>' +
+      (ev.target ? " <span style='color:var(--muted);'>→ " + escHtml(ev.target) + "</span>" : "");
+    if (tab.turnEl) tab.turnEl.querySelector(".turn-body").appendChild(p);
+    else tab.feedEl.appendChild(p);
+    tab.pendingEl = p;
+    scrollFeedEl(tab.feedEl, true);
+  } else if (ev.kind === "text") {
     const t = (ev.text || "").trim();
     if (!t) return;
     if (!tab.turnEl) beginTurn(tab, ev.step || 1);
@@ -662,9 +711,12 @@ function onEvent(ev, tab) {
     body.appendChild(div);
     scrollFeedEl(tab.feedEl, nearBottom(tab.feedEl));
   } else if (ev.kind === "tool") {
+    clearPending(tab);
     appendToolToTurn(tab, ev);
     trackTool(tab, ev);
   } else if (ev.kind === "turn") {
+    finalizeStream(tab);
+    clearPending(tab);
     beginTurn(tab, ev.step);
     tab.stats.tokens = ev.tokens || 0;
     tab.stats.steps = ev.step;
@@ -673,6 +725,8 @@ function onEvent(ev, tab) {
       document.getElementById("f-steps").textContent = tab.stats.steps;
     }
   } else if (ev.kind === "answer") {
+    finalizeStream(tab);
+    clearPending(tab);
     if (tab.turnEl) {
       const body = tab.turnEl.querySelector(".turn-body");
       const div = document.createElement("div");
@@ -688,10 +742,14 @@ function onEvent(ev, tab) {
     }
     scrollFeedEl(tab.feedEl, true);
   } else if (ev.kind === "error") {
+    finalizeStream(tab);
+    clearPending(tab);
     addTabMsg(tab, "error", ev.error);
   } else if (ev.kind === "status") {
     addTabMsg(tab, "turn", ev.message);
   } else if (ev.kind === "done") {
+    finalizeStream(tab);
+    clearPending(tab);
     setRunning(tab, false);
     loadSessions();
   }
@@ -784,6 +842,7 @@ async function openSession(file) {
   document.getElementById("histTitle").textContent = "📜 " + (data.task || "历史会话");
   document.querySelectorAll(".session-item").forEach(el => el.classList.toggle("active", el.dataset.file === file));
   tab.feedEl.innerHTML = "";
+  tab.turnEl = null; tab.streamEl = null; tab.pendingEl = null;
   const turns = data.turns || [];
   if (!turns.length) {
     tab.feedEl.innerHTML = '<div style="color:var(--faint);font-size:12px;padding:20px;text-align:center;">该会话暂无消息记录</div>';
@@ -856,6 +915,7 @@ function closeHistory(tab) {
   document.getElementById("historyBar").style.display = "none";
   document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
   tab.feedEl.innerHTML = "";
+  tab.turnEl = null; tab.streamEl = null; tab.pendingEl = null;
   renderWelcome(tab);
   addTabMsg(tab, "turn", "已返回实时视图——运行新任务开始新的对话");
 }
@@ -1561,7 +1621,7 @@ async function execLine(line) {
     card.style.whiteSpace = "pre-wrap";
   } else if (cmd === "/clear") {
     tab.feedEl.innerHTML = "";
-    tab.turnEl = null;
+    tab.turnEl = null; tab.streamEl = null; tab.pendingEl = null;
     renderWelcome(tab);
   } else {
     addTabMsg(tab, "error", "未知命令: " + cmd + "（/help 查看命令列表）");

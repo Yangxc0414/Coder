@@ -104,6 +104,7 @@ class Agent:
         max_steps: int = MAX_STEPS,
         journal: "SessionJournal | None" = None,
         token_budget: int | None = None,
+        stream_callback: Any = None,
     ) -> None:
         self.llm = llm_client
         self.registry = registry
@@ -120,6 +121,7 @@ class Agent:
         self._max_steps = max_steps
         self.journal = journal
         self._token_budget = token_budget
+        self.stream_callback = stream_callback  # 逐 token 回调（UI 流式展示）
         self._tokens_used = 0
         self._budget_notice_given = False
         self._llm_max_tokens = 4096
@@ -178,6 +180,19 @@ class Agent:
             memory_tool = MemoryTool(self.memory, self.workspace)
             memory_tool.load_from_disk()
             self.registry.register(memory_tool)
+
+    def _stream_kwargs(self) -> dict:
+        """仅当 LLM 支持 on_token 且配置了回调时才传（兼容测试 mock）。"""
+        if not self.stream_callback:
+            return {}
+        try:
+            import inspect as _inspect
+            sig = _inspect.signature(self.llm.chat)
+            if "on_token" in sig.parameters:
+                return {"on_token": self.stream_callback}
+        except (ValueError, TypeError):
+            pass
+        return {}
 
     def request_abort(self) -> None:
         """Request cooperative cancellation at the next step boundary.
@@ -493,6 +508,7 @@ class Agent:
             messages=messages_for_api,
             tools=self.registry.list_tools(),
             max_tokens=self._llm_max_tokens,
+            **(self._stream_kwargs()),
         )
 
         # Length-truncation recovery (OneCode loop.py:586-615 pattern):
@@ -514,6 +530,7 @@ class Agent:
                 messages=messages_for_api,
                 tools=self.registry.list_tools(),
                 max_tokens=self._llm_max_tokens,
+                **(self._stream_kwargs()),
             )
 
         # Build assistant message in the format the API expects.

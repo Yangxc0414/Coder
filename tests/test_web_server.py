@@ -152,6 +152,13 @@ class TestSessionDetail:
 
 
 class TestConfigEndpoint:
+    @pytest.fixture(autouse=True)
+    def _isolate_config_file(self, tmp_path, monkeypatch):
+        """把配置读写隔离到临时文件，避免污染用户真实 ~/.coder_config.json。"""
+        from coder_agent.ui.web import runner
+        fake = tmp_path / "coder_config.json"
+        monkeypatch.setattr(runner, "CONFIG_FILE", fake)
+
     def test_get_config_defaults(self, client, tmp_path: Path):
         web_server._state["manager"] = web_server.RunManager(tmp_path)
         r = client.get("/api/config")
@@ -170,9 +177,4 @@ class TestConfigEndpoint:
         from coder_agent.ui.web.runner import load_config
         cfg = load_config()
         assert cfg.get("model") == "test-model"
-        # 清理配置，避免污染其他测试
-        import os
-        cfg.pop("model", None)
-        cfg.pop("base_url", None)
-        from coder_agent.ui.web.runner import save_config
-        save_config(cfg)
+        # 隔离 fixture 已把配置指向临时文件，无需清理真实配置
