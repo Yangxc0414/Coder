@@ -43,7 +43,24 @@
       <option value="plan">plan</option><option value="dry-run">dry-run</option>
     </select></label>
     <label>模型 <input type="text" id="model" value="agnes-2.5-flash" style="width:180px;"></label>
+    <button class="primary" style="background:#37474f;" onclick="openFolderDialog()">📂 打开文件夹</button>
+    <span id="ws" style="font-size:12px;color:#8e9aa8;"></span>
     <span id="state" style="font-size:12px;color:#8e9aa8;">空闲</span>
+
+  <div id="folderModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50;">
+    <div style="background:#1b1e24; border:1px solid #2a2e36; border-radius:10px; width:520px; margin:80px auto; padding:16px;">
+      <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+        <b>选择工作区文件夹</b>
+        <button onclick="closeFolderDialog()" style="background:none;color:#8e9aa8;border:none;cursor:pointer;">✕</button>
+      </div>
+      <div id="crumb" style="font-size:12px;color:#4fc3f7; margin-bottom:8px; word-break:break-all;"></div>
+      <div id="dirList" style="max-height:300px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;"></div>
+      <div style="display:flex; gap:8px; margin-top:12px;">
+        <button class="primary" onclick="chooseFolder()">选择当前目录</button>
+        <button onclick="upFolder()" style="background:#22262d;color:#cfcfcf;border:1px solid #2a2e36;border-radius:6px;padding:8px 14px;cursor:pointer;">上一级</button>
+      </div>
+    </div>
+  </div>
   </header>
   <div id="feed"></div>
   <form id="form">
@@ -114,6 +131,43 @@ async function abort() {
   setTimeout(() => aborting = false, 1500);
 }
 
+async function openFolderDialog() {
+  document.getElementById("folderModal").style.display = "block";
+  browseFolder("");
+}
+function closeFolderDialog() { document.getElementById("folderModal").style.display = "none"; }
+let browseCurrent = "";
+async function browseFolder(path) {
+  const resp = await fetch("/api/fs/browse?path=" + encodeURIComponent(path));
+  const data = await resp.json();
+  browseCurrent = data.current;
+  document.getElementById("crumb").textContent = data.current || "（选择盘符）";
+  const list = document.getElementById("dirList");
+  list.innerHTML = "";
+  data.dirs.forEach(d => {
+    const b = document.createElement("button");
+    b.className = "session"; b.textContent = "📁 " + d;
+    b.onclick = () => browseFolder(d);
+    list.appendChild(b);
+  });
+}
+async function upFolder() { browseFolder(document.getElementById("crumb").textContent.replace(/\$/, "")); }
+async function chooseFolder() {
+  const resp = await fetch("/api/workspace", { method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ path: browseCurrent }) });
+  const data = await resp.json();
+  if (data.ok) {
+    document.getElementById("ws").textContent = "工作区: " + data.workspace;
+    closeFolderDialog(); loadSessions();
+    add("turn", "📂 工作区已切换: " + data.workspace);
+  } else { add("error", data.detail || "切换失败"); }
+}
+async function loadWorkspace() {
+  const r = await (await fetch("/api/workspace")).json();
+  document.getElementById("ws").textContent = "工作区: " + r.workspace;
+}
+
 async function loadSessions() {
   const box = document.getElementById("sessions");
   const resp = await fetch("/api/sessions");
@@ -130,6 +184,7 @@ async function loadSessions() {
   });
 }
 loadSessions();
+loadWorkspace();
 </script>
 </body>
 </html>

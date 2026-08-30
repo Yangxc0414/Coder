@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -18,8 +19,18 @@ from .runner import RunManager
 
 app = FastAPI(title="Coder-Agent Web")
 
-WORKSPACE = Path(".").resolve()
-manager = RunManager(WORKSPACE)
+# 工作区状态：支持页面中"打开文件夹"切换（运行中禁止切换）
+_state = {"manager": RunManager(Path(".").resolve())}
+
+
+def get_manager() -> RunManager:
+    return _state["manager"]
+
+
+def set_workspace(path: Path) -> None:
+    if get_manager().running:
+        raise HTTPException(status_code=409, detail="任务运行中，无法切换工作区")
+    _state["manager"] = RunManager(path.resolve())
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -42,7 +53,7 @@ def index() -> HTMLResponse:
 
 @app.post("/api/run")
 def api_run(req: RunRequest):
-    result = manager.start(req.task, mode=req.mode, model=req.model)
+    result = get_manager().start(req.task, mode=req.mode, model=req.model)
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result.get("error"))
     return result
@@ -50,7 +61,7 @@ def api_run(req: RunRequest):
 
 @app.post("/api/abort")
 def api_abort():
-    manager.abort()
+    get_manager().abort()
     return {"ok": True}
 
 
@@ -59,7 +70,7 @@ async def api_events():
     async def gen():
         loop = asyncio.get_event_loop()
         # 在线程池里消费阻塞队列，逐条转 SSE
-        for event in manager.stream_events():
+        for event in get_manager().stream_events():
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             await asyncio.sleep(0)
 
@@ -102,9 +113,49 @@ def api_resume(req: RunRequest):
                          resume_path=resume_path)
 
 
+@app.get("/api/fs/browse")
+def api_fs_browse(path: str = ""):
+    """列出目录下的子目录（供"打开文件夹"导航）；path 为空时列出盘符。"""
+    import string
+
+    if not path:
+        drives = [d + ":\\" for d in string.ascii_uppercase
+                  if os.path.exists(d + ":\\")]
+        return {"current": "", "parent": None, "dirs": drives, "drives": True}
+    p = Path(path)
+    if not p.is_dir():
+        raise HTTPException(status_code=404, detail="目录不存在")
+    dirs = []
+    try:
+        for child in sorted(p.iterdir()):
+            if child.is_dir() and not child.name.startswith("."):
+                dirs.append(str(child))
+    except (OSError, PermissionError) as e:
+        raise HTTPException(status_code=403, detail=f"无法读取目录: {e}")
+    parent = str(p.parent) if p.parent != p else None
+    return {"current": str(p), "parent": parent, "dirs": dirs, "drives": False}
+
+
+@app.post("/api/workspace")
+def api_workspace(req: dict):
+    target = Path(req.get("path", "")).expanduser()
+    if not target.is_dir():
+        raise HTTPException(status_code=404, detail="目录不存在")
+    set_workspace(target)
+    m = get_manager()
+    return {"ok": True, "workspace": str(m.workspace)}
+
+
+@app.get("/api/workspace")
+def api_get_workspace():
+    return {"workspace": str(get_manager().workspace)}
+
+
 @app.get("/api/status")
 def api_status():
-    return {"running": manager.running, "model": manager.model, "mode": manager.mode}
+    m = get_manager()
+    return {"running": m.running, "model": m.model, "mode": m.mode,
+            "workspace": str(m.workspace)}
 
 
 if __name__ == "__main__":
