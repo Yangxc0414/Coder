@@ -620,9 +620,10 @@ function renderWelcome(tab) {
     '<div class="suggest-chips">' + SUGGESTS.map(s =>
       '<button class="chip" data-s="' + escHtml(s) + '">' + escHtml(s) + '</button>'
     ).join("") + '</div>' +
-    '<div class="suggest-label">执行模式（与框架一致）：</div>' +
-    '<div class="suggest-chips">' + MODES.map(m =>
-      '<span class="chip" title="' + escHtml(m.desc) + '" style="cursor:default;">' + m.name + '</span>'
+    '<div class="suggest-label">执行模式（点击切换，与框架一致）：</div>' +
+    '<div class="suggest-chips" id="modeChips">' + MODES.map(m =>
+      '<button class="chip" data-mode="' + m.name + '" title="' + escHtml(m.desc) + '">' +
+      m.name + '</button>'
     ).join("") + '</div>' +
     '<div class="suggest-label">扩展能力（点击进入管理）：</div>' +
     '<div class="suggest-chips">' +
@@ -639,7 +640,38 @@ function renderWelcome(tab) {
   w.querySelectorAll(".chip").forEach(c => {
     c.onclick = () => { inputEl.value = c.dataset.s; inputEl.focus(); };
   });
+  // 模式 chips：点击切换 header 模式 select（与框架 AgentMode 一致）
+  bindModeChips(tab.feedEl);
   tab.feedEl.appendChild(w);
+}
+
+function bindModeChips(scope) {
+  const chips = scope.querySelectorAll("#modeChips .chip");
+  if (!chips.length) return;
+  const sync = () => {
+    const cur = document.getElementById("mode").value;
+    chips.forEach(ch => {
+      const active = ch.dataset.mode === cur;
+      ch.style.cssText = active
+        ? "border-color:var(--accent);color:var(--accent);background:var(--user-bg);"
+        : "";
+    });
+  };
+  chips.forEach(ch => {
+    ch.onclick = () => {
+      const mode = ch.dataset.mode;
+      document.getElementById("mode").value = mode;  // 与 header select 同步
+      sync();
+      const t = activeTab();
+      if (t) addTabMsg(t, "turn", "⚙ 模式已切换: " + mode +
+        "（" + (MODES.find(m => m.name === mode) || {}).desc + "）");
+    };
+  });
+  sync();
+  // header select 手动切换时同步 chips 高亮
+  document.getElementById("mode").onchange = () => {
+    sync();
+  };
 }
 
 /* ═══════════ Mini-Markdown ═══════════ */
