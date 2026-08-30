@@ -2233,9 +2233,8 @@ async function execLine(line) {
     } else if (arg) {
       tab.goal = arg;
       updateGoalBadge();
-      addTabMsg(tab, "turn", "🎯 会话目标已设置并开始执行: " + arg +
-        "\n（agent 将持续工作直到目标达成——Verifier 检查确认，未达成自动修复重试）");
-      // 以该描述作为任务立即开始（不再停留在"仅设置"状态）
+      // 不重复描述：用户消息（submitTask 添加）已展示目标
+      addTabMsg(tab, "turn", "🎯 会话目标已设置并开始执行——将持续工作直到达成（Verifier 检查确认，未达成自动修复重试）");
       submitTask(arg);
     } else addTabMsg(tab, "answer", tab.goal
       ? "当前会话目标: " + tab.goal
