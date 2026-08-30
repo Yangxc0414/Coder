@@ -5,80 +5,66 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Coder-Agent 客户端</title>
 <style>
-  /* 深色主题客户端样式 */
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: #14161a; color: #e6e6e6; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; height: 100vh; display: flex; }
   aside { width: 260px; background: #1b1e24; border-right: 1px solid #2a2e36; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
   aside h1 { font-size: 16px; color: #4fc3f7; }
-  aside button.session { text-align: left; background: #22262d; color: #cfcfcf; border: 1px solid #2a2e36; border-radius: 6px; padding: 8px; cursor: pointer; font-size: 12px; }
-  aside button.session:hover { border-color: #4fc3f7; }
-  main { flex: 1; display: flex; flex-direction: column; }
-  header { padding: 10px 16px; border-bottom: 1px solid #2a2e36; display: flex; gap: 10px; align-items: center; }
-  select, input[type=text], textarea { background: #22262d; color: #e6e6e6; border: 1px solid #2a2e36; border-radius: 6px; padding: 6px 10px; }
-  textarea { flex: 1; font-family: inherit; font-size: 14px; line-height: 1.5; max-height: 160px; }
+  main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  header { padding: 10px 16px; border-bottom: 1px solid #2a2e36; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  select, input[type=text] { background: #22262d; color: #e6e6e6; border: 1px solid #2a2e36; border-radius: 6px; padding: 6px 10px; }
+  textarea { flex: 1; background: #22262d; color: #e6e6e6; border: 1px solid #2a2e36; border-radius: 6px; padding: 6px 10px; font-family: inherit; font-size: 14px; line-height: 1.5; resize: none; overflow: hidden; max-height: 160px; }
   textarea:focus { outline: none; border-color: #4fc3f7; }
   #feed { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
   .user { align-self: flex-end; background: #1e3a5f; border-radius: 10px 10px 2px 10px; padding: 8px 12px; max-width: 75%; white-space: pre-wrap; }
   .answer { align-self: flex-start; background: #16321f; border: 1px solid #2e7d32; border-radius: 10px 10px 10px 2px; padding: 10px 14px; max-width: 85%; white-space: pre-wrap; }
   .tool { align-self: flex-start; color: #9aa4b0; font-size: 12px; font-family: Consolas, monospace; }
-  .tool.fail { color: #ef5350; }
   .think { align-self: flex-start; color: #8e9aa8; font-size: 12px; max-width: 85%; white-space: pre-wrap; border-left: 2px solid #333a44; padding-left: 8px; }
   .turn { align-self: center; color: #555e6a; font-size: 11px; }
   .error { align-self: flex-start; background: #3a1e1e; color: #ef9a9a; border-radius: 8px; padding: 8px 12px; }
-  form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #2a2e36; }
-  form input[type=text] { flex: 1; }
+  details.tool-details { align-self: flex-start; max-width: 85%; border: 1px solid #2a2e36; border-radius: 8px; overflow: hidden; }
+  details.tool-details summary { padding: 6px 10px; cursor: pointer; font-size: 12px; font-family: Consolas, monospace; color: #9aa4b0; list-style: none; background: #1b1e24; }
+  details.tool-details summary .ok { color: #66bb6a; }
+  details.tool-details summary .fail { color: #ef5350; }
+  details.tool-details .body { padding: 8px 10px; background: #0d0f12; font-family: Consolas, monospace; font-size: 12px; color: #c8e1ff; max-height: 240px; overflow: auto; white-space: pre-wrap; }
+  #footer { padding: 6px 16px; border-top: 1px solid #2a2e36; font-size: 11px; color: #555e6a; display: flex; gap: 16px; }
+  #palette { display: none; position: absolute; bottom: 70px; left: 16px; right: 16px; background: #1b1e24; border: 1px solid #2a2e36; border-radius: 10px; max-height: 280px; overflow-y: auto; z-index: 40; box-shadow: 0 -4px 20px rgba(0,0,0,.4); }
+  #palette .item { padding: 8px 12px; cursor: pointer; display: flex; gap: 10px; align-items: baseline; }
+  #palette .item.active { background: #1e3a5f; }
+  #palette .item .name { color: #4fc3f7; font-family: Consolas, monospace; min-width: 150px; }
+  #palette .item .desc { color: #8e9aa8; font-size: 12px; }
+  #palette .empty { padding: 8px 12px; color: #555e6a; font-size: 12px; }
+  .md h1, .md h2, .md h3 { margin: 10px 0 6px; color: #e6e6e6; }
+  .md p { margin: 6px 0; }
+  .md pre { background: #0d0f12; border: 1px solid #2a2e36; border-radius: 8px; padding: 10px; overflow-x: auto; margin: 8px 0; position: relative; }
+  .md pre code { font-family: Consolas, monospace; font-size: 12px; color: #c8e1ff; }
+  .md code.inline { background: #22262d; border-radius: 4px; padding: 1px 5px; font-family: Consolas, monospace; color: #c8e1ff; }
+  .md ul, .md ol { margin: 6px 0 6px 20px; }
+  .md li { margin: 2px 0; }
+  .copy-btn { position: absolute; top: 6px; right: 6px; background: #22262d; color: #8e9aa8; border: 1px solid #2a2e36; border-radius: 4px; font-size: 11px; padding: 2px 8px; cursor: pointer; }
+  .copy-btn:hover { color: #4fc3f7; border-color: #4fc3f7; }
   button.primary { background: #1e88e5; color: white; border: none; border-radius: 6px; padding: 8px 18px; cursor: pointer; }
   button.stop { background: #c62828; color: white; border: none; border-radius: 6px; padding: 8px 14px; cursor: pointer; display: none; }
-  #palette { display:none; position:absolute; bottom:64px; left:16px; right:16px;
-    background:#1b1e24; border:1px solid #2a2e36; border-radius:10px;
-    max-height:280px; overflow-y:auto; z-index:40; box-shadow:0 -4px 20px rgba(0,0,0,.4); }
-  #palette .item { padding:8px 12px; cursor:pointer; display:flex; gap:10px; align-items:baseline; }
-  #palette .item.active { background:#1e3a5f; }
-  #palette .item .name { color:#4fc3f7; font-family:Consolas,monospace; min-width:150px; }
-  #palette .item .desc { color:#8e9aa8; font-size:12px; }
-  #palette .empty { padding:8px 12px; color:#555e6a; font-size:12px; }
-  .md h1,.md h2,.md h3 { margin:10px 0 6px; color:#e6e6e6; }
-  .md p { margin:6px 0; }
-  .md pre { background:#0d0f12; border:1px solid #2a2e36; border-radius:8px;
-    padding:10px; overflow-x:auto; margin:8px 0; position:relative; }
-  .md pre code { font-family:Consolas,monospace; font-size:12px; color:#c8e1ff; }
-  .md code.inline { background:#22262d; border-radius:4px; padding:1px 5px;
-    font-family:Consolas,monospace; color:#c8e1ff; }
-  .md ul,.md ol { margin:6px 0 6px 20px; }
-  .md li { margin:2px 0; }
-  .copy-btn { position:absolute; top:6px; right:6px; background:#22262d;
-    color:#8e9aa8; border:1px solid #2a2e36; border-radius:4px;
-    font-size:11px; padding:2px 8px; cursor:pointer; }
-  .copy-btn:hover { color:#4fc3f7; border-color:#4fc3f7; }
-  details.tool-details { align-self:flex-start; max-width:85%;
-    border:1px solid #2a2e36; border-radius:8px; overflow:hidden; }
-  details.tool-details summary { padding:6px 10px; cursor:pointer;
-    font-size:12px; font-family:Consolas,monospace; color:#9aa4b0;
-    list-style:none; background:#1b1e24; }
-  details.tool-details summary .ok { color:#66bb6a; }
-  details.tool-details summary .fail { color:#ef5350; }
-  details.tool-details .body { padding:8px 10px; background:#0d0f12;
-    font-family:Consolas,monospace; font-size:12px; color:#c8e1ff;
-    max-height:240px; overflow:auto; white-space:pre-wrap; }
-  #footer { padding:6px 16px; border-top:1px solid #2a2e36;
-    font-size:11px; color:#555e6a; display:flex; gap:16px; }
+  form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #2a2e36; }
+  button.session { text-align: left; background: #22262d; color: #cfcfcf; border: 1px solid #2a2e36; border-radius: 6px; padding: 8px; cursor: pointer; font-size: 12px; }
+  button.session:hover { border-color: #4fc3f7; }
+  #ws { font-size: 12px; color: #8e9aa8; word-break: break-all; }
 </style>
 </head>
 <body>
 <aside>
   <h1>📋 Coder-Agent</h1>
   <div style="display:flex; gap:6px; margin-bottom:6px;">
-    <button class="session" id="tab-sessions" style="flex:1;" onclick="showTab('sessions')">会话</button>
+    <button class="session" id="tab-sessions" style="flex:1; border-color:#4fc3f7;" onclick="showTab('sessions')">会话</button>
     <button class="session" id="tab-files" style="flex:1;" onclick="showTab('files')">文件</button>
   </div>
-  <div id="pane-sessions" style="display:flex;flex-direction:column;gap:10px;flex:1;overflow-y:auto;">
-    <div style="font-size:12px;color:#8e9aa8;">会话（最新在前，点击恢复）</div>
-    <div id="sessions" style="display:flex;flex-direction:column;gap:6px;"></div>
+  <div id="pane-sessions" style="display:flex; flex-direction:column; gap:10px; flex:1; overflow-y:auto;">
+    <div style="font-size:12px; color:#8e9aa8;">会话（最新在前，点击恢复）</div>
+    <div id="sessions" style="display:flex; flex-direction:column; gap:6px;"></div>
     <button class="session" onclick="loadSessions()">↻ 刷新</button>
   </div>
-  <div id="pane-files" style="display:none;flex-direction:column;gap:6px;flex:1;overflow-y:auto;">
+  <div id="pane-files" style="display:none; flex-direction:column; gap:6px; flex:1; overflow-y:auto;">
     <button class="session" onclick="loadFiles()">↻ 刷新文件树</button>
-    <div id="filetree" style="display:flex;flex-direction:column;gap:2px;"></div>
+    <div id="filetree" style="display:flex; flex-direction:column; gap:2px;"></div>
   </div>
 </aside>
 <main>
@@ -89,86 +75,92 @@
     </select></label>
     <label>模型 <input type="text" id="model" value="agnes-2.5-flash" style="width:180px;"></label>
     <button class="primary" style="background:#37474f;" onclick="openFolderDialog()">📂 打开文件夹</button>
-    <span id="ws" style="font-size:12px;color:#8e9aa8;"></span>
-    <span id="state" style="font-size:12px;color:#8e9aa8;">空闲</span>
-
-  <div id="fileModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:60;">
-    <div style="background:#1b1e24; border:1px solid #2a2e36; border-radius:10px;
-      width:80%; height:80%; margin:40px auto; padding:14px; display:flex; flex-direction:column;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-        <b id="fileTitle" style="word-break:break-all; font-size:13px;"></b>
-        <button onclick="closeFileViewer()" style="background:none;color:#8e9aa8;border:none;cursor:pointer;">✕</button>
-      </div>
-      <pre id="fileBody" style="flex:1; overflow:auto; background:#0d0f12; border-radius:8px;
-        padding:12px; font-family:Consolas,monospace; font-size:12px; color:#c8e1ff; white-space:pre-wrap;"></pre>
-    </div>
-  </div>
-  <div id="folderModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50;">
-    <div style="background:#1b1e24; border:1px solid #2a2e36; border-radius:10px; width:520px; margin:80px auto; padding:16px;">
-      <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
-        <b>选择工作区文件夹</b>
-        <button onclick="closeFolderDialog()" style="background:none;color:#8e9aa8;border:none;cursor:pointer;">✕</button>
-      </div>
-      <div id="crumb" style="font-size:12px;color:#4fc3f7; margin-bottom:8px; word-break:break-all;"></div>
-      <div id="dirList" style="max-height:300px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;"></div>
-      <div style="display:flex; gap:8px; margin-top:12px;">
-        <button class="primary" onclick="chooseFolder()">选择当前目录</button>
-        <button onclick="upFolder()" style="background:#22262d;color:#cfcfcf;border:1px solid #2a2e36;border-radius:6px;padding:8px 14px;cursor:pointer;">上一级</button>
-      </div>
-    </div>
-  </div>
+    <span id="ws"></span>
+    <span id="state" style="font-size:12px; color:#8e9aa8;">空闲</span>
   </header>
   <div id="feed"></div>
   <div id="palette"></div>
   <div id="footer">
     <span id="f-tokens">tokens: 0</span>
     <span id="f-steps">steps: 0</span>
-    <span id="f-mode"></span>
-    <span id="f-copy">© Coder-Agent（自研，零框架）</span>
+    <span id="f-mode">mode: full</span>
+    <span>© Coder-Agent（自研，零框架）</span>
   </div>
   <form id="form">
-    <textarea id="task" rows="1" placeholder="输入编程任务… Enter 发送 / Shift+Enter 换行 / 输入 / 呼出命令面板"
-      autocomplete="off" style="resize:none; overflow:hidden;"></textarea>
+    <textarea id="task" rows="1" placeholder="输入编程任务… Enter 发送 / Shift+Enter 换行 / 输入 / 呼出命令面板" autocomplete="off"></textarea>
     <button type="submit" class="primary" id="send">运行</button>
     <button type="button" class="stop" id="stop" onclick="abort()">■ 停止</button>
   </form>
 </main>
+<div id="folderModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50;">
+  <div style="background:#1b1e24; border:1px solid #2a2e36; border-radius:10px; width:520px; margin:80px auto; padding:16px;">
+    <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+      <b>选择工作区文件夹</b>
+      <button onclick="closeFolderDialog()" style="background:none; color:#8e9aa8; border:none; cursor:pointer;">✕</button>
+    </div>
+    <div id="crumb" style="font-size:12px; color:#4fc3f7; margin-bottom:8px; word-break:break-all;"></div>
+    <div id="dirList" style="max-height:300px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;"></div>
+    <div style="display:flex; gap:8px; margin-top:12px;">
+      <button class="primary" onclick="chooseFolder()">选择当前目录</button>
+      <button onclick="upFolder()" style="background:#22262d; color:#cfcfcf; border:1px solid #2a2e36; border-radius:6px; padding:8px 14px; cursor:pointer;">上一级</button>
+    </div>
+  </div>
+</div>
+<div id="fileModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:60;">
+  <div style="background:#1b1e24; border:1px solid #2a2e36; border-radius:10px; width:80%; height:80%; margin:40px auto; padding:14px; display:flex; flex-direction:column;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+      <b id="fileTitle" style="word-break:break-all; font-size:13px;"></b>
+      <button onclick="closeFileViewer()" style="background:none; color:#8e9aa8; border:none; cursor:pointer;">✕</button>
+    </div>
+    <pre id="fileBody" style="flex:1; overflow:auto; background:#0d0f12; border-radius:8px; padding:12px; font-family:Consolas,monospace; font-size:12px; color:#c8e1ff; white-space:pre-wrap;"></pre>
+  </div>
+</div>
 <script>
 const feed = document.getElementById("feed");
 const footerTokens = document.getElementById("f-tokens");
 const footerSteps = document.getElementById("f-steps");
+const footerMode = document.getElementById("f-mode");
+const inputEl = document.getElementById("task");
+const paletteEl = document.getElementById("palette");
+let running = false;
+let sessionGoal = "";
+let palItems = [], palIndex = -1;
 
-/* ── Mini-Markdown 渲染（离线，无 CDN 依赖）── */
-function escHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+/* ── 工具函数 ── */
+function escHtml(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function nearBottom() { return feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80; }
+function scrollFeed(force) { if (force || nearBottom()) feed.scrollTop = feed.scrollHeight; }
+function add(cls, text) {
+  const stick = nearBottom();
+  const div = document.createElement("div");
+  div.className = cls; div.textContent = text;
+  feed.appendChild(div); scrollFeed(stick || cls === "user");
+  return div;
+}
+
+/* ── Mini-Markdown 渲染（离线，零 CDN 依赖）── */
 function renderMarkdown(md) {
-  const blocks = md.split(/
-```/);
+  const blocks = md.split(/\n```/);
   let html = "";
   const codeStore = [];
   blocks.forEach((blk, bi) => {
-    if (bi % 2 === 1) {  // 代码块（``` 之后到下一个 ```）
-      const nl = blk.indexOf("
-");
+    if (bi % 2 === 1) {
+      const nl = blk.indexOf("\n");
       const body = nl >= 0 ? blk.slice(nl + 1) : blk;
       const id = "code_" + codeStore.length;
-      codeStore.push(body.replace(/
-$/, ""));
-      html += '<pre><code>' + escHtml(body.replace(/
-$/, "")) +
+      codeStore.push(body.replace(/\n$/, ""));
+      html += '<pre><code>' + escHtml(body.replace(/\n$/, "")) +
               '</code><button class="copy-btn" data-code="' + id + '">复制</button></pre>';
       return;
     }
     let seg = escHtml(blk);
-    seg = seg.replace(/`([^`
-]+)`/g, '<code class="inline">$1</code>');
+    seg = seg.replace(/`([^`\n]+)`/g, '<code class="inline">$1</code>');
     seg = seg.replace(/^###\s?(.+)$/gm, "<h3>$1</h3>");
     seg = seg.replace(/^##\s?(.+)$/gm, "<h2>$1</h2>");
     seg = seg.replace(/^#\s?(.+)$/gm, "<h1>$1</h1>");
     seg = seg.replace(/^\s?[-*]\s+(.+)$/gm, "<li>$1</li>");
     seg = seg.replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, "<ul>$1</ul>");
-    seg = seg.replace(/^\s?(\d+)\.\s+(.+)$/gm, "<li>$2</li>");
-    seg = seg.replace(/\*\*([^*
-]+)\*\*/g, "<b>$1</b>");
+    seg = seg.replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
     html += "<div class='md'>" + seg + "</div>";
   });
   const wrap = document.createElement("div");
@@ -182,265 +174,146 @@ $/, "")) +
   });
   return wrap;
 }
-const stateEl = document.getElementById("state");
-let running = false;
 
-function nearBottom() {
-  return feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
-}
-function scrollFeed(force) {
-  if (force || nearBottom()) feed.scrollTop = feed.scrollHeight;
-}
-function add(cls, text) {
-  const stick = nearBottom();
-  const div = document.createElement("div");
-  div.className = cls; div.textContent = text;
-  feed.appendChild(div); scrollFeed(stick || cls === "user");
-  return div;
+/* ── 运行状态 ── */
+function setRunning(v) {
+  running = v;
+  document.getElementById("state").textContent = v ? "运行中…" : "空闲";
+  document.getElementById("stop").style.display = v ? "inline-block" : "none";
+  document.getElementById("send").disabled = v;
+  footerMode.textContent = "mode: " + document.getElementById("mode").value;
 }
 
-document.getElementById("form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const v = document.getElementById("task").value.trim();
-  if (!v || running) return;
-  if (v.startsWith("/")) { add("user", v); execLine(v); document.getElementById("task").value = ""; return; }
-  submitTask(v);
-});
+/* ── SSE 事件渲染 ── */
+function onEvent(ev) {
+  if (ev.kind === "text") {
+    const t = (ev.text || "").trim();
+    if (t) add("think", "│ " + (t.length > 600 ? t.slice(0, 600) + "…" : t));
+  } else if (ev.kind === "tool") {
+    const det = document.createElement("details");
+    det.className = "tool-details";
+    const mark = ev.success ? '<span class="ok">✓</span>' : '<span class="fail">✗</span>';
+    det.innerHTML = "<summary>" + mark + " step " + ev.step + "  " +
+      escHtml(ev.tool) + (ev.target ? "  <b>" + escHtml(ev.target) + "</b>" : "") + "</summary>" +
+      '<div class="body">' + escHtml(ev.detail ? ("error: " + ev.detail + "\n") : "") +
+      (ev.preview || "(无输出)") + "</div>";
+    feed.appendChild(det); scrollFeed(nearBottom());
+  } else if (ev.kind === "turn") {
+    add("turn", "── turn " + ev.step + " ──");
+    footerTokens.textContent = "tokens: " + (ev.tokens || 0);
+    footerSteps.textContent = "steps: " + ev.step;
+  } else if (ev.kind === "answer") {
+    const div = document.createElement("div");
+    div.className = "answer";
+    div.appendChild(renderMarkdown(ev.answer));
+    feed.appendChild(div); scrollFeed(true);
+  } else if (ev.kind === "error") {
+    add("error", ev.error);
+  } else if (ev.kind === "status") {
+    add("turn", ev.message);
+  } else if (ev.kind === "done") {
+    setRunning(false); loadSessions();
+  }
+}
 
+async function listenEvents() {
+  const es = new EventSource("/api/events");
+  es.onmessage = (e) => onEvent(JSON.parse(e.data));
+  es.onerror = () => { es.close(); setRunning(false); };
+}
+
+/* ── 运行 / 停止 ── */
 async function submitTask(task) {
   if (running || !task) return;
   add("user", task);
-  document.getElementById("task").value = "";
+  inputEl.value = ""; inputEl.style.height = "auto";
   setRunning(true);
   const mode = document.getElementById("mode").value;
   const model = document.getElementById("model").value;
   const resp = await fetch("/api/run", { method: "POST",
-    headers: {"Content-Type": "application/json"},
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ task, mode, model, goal: sessionGoal }) });
   if (!resp.ok) {
-    const err = await resp.json().catch(() => ({detail: "未知错误"}));
+    const err = await resp.json().catch(() => ({ detail: "未知错误" }));
     add("error", err.detail || "启动失败"); setRunning(false); return;
   }
   listenEvents();
 }
 
-async function execLine(line) {
-  const [cmd, ...rest] = line.split(/\s+/);
-  const arg = rest.join(" ");
-  if (cmd === "/help") {
-    const card = add("answer", "");
-    card.innerHTML = "<b>命令列表</b>
-" + COMMANDS.map(c => c.name + " — " + c.desc).join("
-");
-    card.style.whiteSpace = "pre-wrap";
-  } else if (cmd === "/status") {
-    const s = await (await fetch("/api/status")).json();
-    add("answer", "运行中: " + s.running + " | 模型: " + s.model +
-        " | 模式: " + s.mode + "
-工作区: " + s.workspace +
-        (sessionGoal ? "
-会话目标: " + sessionGoal : ""));
-  } else if (cmd === "/tools") {
-    const d = await (await fetch("/api/tools")).json();
-    const card = add("answer", "");
-    card.innerHTML = "<b>模型可用工具 (" + d.tools.length + ")</b>
-" +
-        d.tools.map(t => "  " + t.name + " — " + t.description).join("
-");
-    card.style.whiteSpace = "pre-wrap";
-  } else if (cmd === "/model") {
-    if (!arg) {
-      const d = await (await fetch("/api/models")).json();
-      const cur = document.getElementById("model").value;
-      if (d.models.length) {
-        if (!d.models.includes(cur)) document.getElementById("model").value = d.models[0];
-        add("answer", "在线模型:
-" + d.models.map(m =>
-          (m === document.getElementById("model").value ? "  <- " : "  ") + m).join("
-"));
-      } else add("error", "在线模型列表不可用");
-    } else {
-      document.getElementById("model").value = arg;
-      add("answer", "模型已切换: " + arg + "（下次运行生效）");
-    }
-  } else if (cmd === "/mode") {
-    if (["full","goal","plan","dry-run"].includes(arg)) {
-      document.getElementById("mode").value = arg;
-      add("answer", "模式已切换: " + arg);
-    } else add("answer", "当前模式: " + document.getElementById("mode").value +
-               "（用法: /mode full|goal|plan|dry-run）");
-  } else if (cmd === "/goal") {
-    if (arg === "clear") { sessionGoal = ""; add("answer", "会话目标已清除"); }
-    else if (arg) { sessionGoal = arg; add("answer", "会话目标已设置: " + arg +
-               "
-将随每次运行注入系统提示"); }
-    else add("answer", sessionGoal ? "当前会话目标: " + sessionGoal : "未设置（用法: /goal <text>）");
-  } else if (cmd === "/sessions") {
-    const d = await (await fetch("/api/sessions")).json();
-    const card = add("answer", "");
-    card.innerHTML = d.sessions.length
-        ? "<b>会话列表:</b>
-" + d.sessions.map((s, i) => (i + 1) + ". " + s.task).join("
-")
-        : "没有会话——先运行一次任务";
-    card.style.whiteSpace = "pre-wrap";
-  } else if (cmd === "/resume") {
-    setRunning(true);
-    const resp = await fetch("/api/resume", { method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ task: arg || "继续之前的任务", goal: sessionGoal,
-                             resume: "" }) });
-    if (!resp.ok) { add("error", (await resp.json().catch(() => ({}))).detail || "恢复失败");
-      setRunning(false); return; }
-    listenEvents();
-  } else if (cmd === "/clear") {
-    feed.innerHTML = "";
-  } else {
-    add("error", "未知命令: " + cmd + "（/help 查看命令列表）");
-  }
-}
-
-async function listenEvents() {
-
-function setRunning(v) {
-  running = v;
-  stateEl.textContent = v ? "运行中…" : "空闲";
-  document.getElementById("stop").style.display = v ? "inline-block" : "none";
-  document.getElementById("send").disabled = v;
-  document.getElementById("f-mode").textContent = "mode: " + document.getElementById("mode").value;
-}
-
-/* ── 斜杠命令面板（对标 Claude Code）── */
-let sessionGoal = "";
-const COMMANDS = [
-  {name: "/help",    desc: "显示命令帮助", hasArgs: false},
-  {name: "/status",  desc: "显示运行状态与当前工作区", hasArgs: false},
-  {name: "/tools",   desc: "列出模型可用的 17 个工具", hasArgs: false},
-  {name: "/model",   desc: "切换模型（无参数显示在线列表，可按序号选择）", hasArgs: true},
-  {name: "/mode",    desc: "切换执行模式 full/goal/plan/dry-run", hasArgs: true},
-  {name: "/goal",    desc: "设置会话目标（注入后续每次运行）", hasArgs: true},
-  {name: "/sessions",desc: "列出会话（含任务预览）", hasArgs: false},
-  {name: "/resume",  desc: "恢复会话（无参=最新；或会话序号）", hasArgs: true},
-  {name: "/clear",   desc: "清空对话显示", hasArgs: false},
-];
-const inputEl = document.getElementById("task");
-const paletteEl = document.getElementById("palette");
-let palItems = [], palIndex = -1;
-
-function renderPalette(items) {
-  palItems = items; palIndex = items.length ? 0 : -1;
-  paletteEl.innerHTML = "";
-  if (!items.length) {
-    paletteEl.innerHTML = '<div class="empty">没有匹配的命令</div>';
-  } else {
-    items.forEach((c, i) => {
-      const div = document.createElement("div");
-      div.className = "item" + (i === palIndex ? " active" : "");
-      div.innerHTML = '<span class="name">' + c.name + '</span>' +
-                      '<span class="desc">' + c.desc + '</span>';
-      div.onclick = () => pickPalette(c);
-      paletteEl.appendChild(div);
-    });
-  }
-  paletteEl.style.display = "block";
-}
-function hidePalette() { paletteEl.style.display = "none"; palItems = []; palIndex = -1; }
-function movePalette(dir) {
-  if (!palItems.length) return;
-  palIndex = (palIndex + dir + palItems.length) % palItems.length;
-  [...paletteEl.querySelectorAll(".item")].forEach((el, i) =>
-    el.classList.toggle("active", i === palIndex));
-}
-function pickPalette(c) {
-  if (c.hasArgs) { inputEl.value = c.name + " "; hidePalette(); inputEl.focus(); }
-  else { inputEl.value = c.name; hidePalette(); execLine(c.name); }
-}
-function updatePalette() {
-  const v = inputEl.value;
-  if (!v.startsWith("/") || running) { hidePalette(); return; }
-  const token = v.split(/\s+/)[0];
-  const matches = COMMANDS.filter(c => c.name.startsWith(token));
-  renderPalette(matches);
-}
-inputEl.addEventListener("input", updatePalette);
-inputEl.addEventListener("keydown", (e) => {
-  const v = inputEl.value;
-  const paletteOpen = paletteEl.style.display === "block";
-  if (e.key === "Escape") {
-    if (paletteOpen) { hidePalette(); e.preventDefault(); return; }
-    if (running) { abort(); e.preventDefault(); }
-    return;
-  }
-  if (e.key === "Enter" && e.shiftKey) return;  // 换行走默认行为
-  if (paletteOpen && e.key === "ArrowDown") { movePalette(1); e.preventDefault(); return; }
-  if (paletteOpen && e.key === "ArrowUp") { movePalette(-1); e.preventDefault(); return; }
-  if (e.key === "Tab" && paletteOpen && palItems[palIndex]) {
-    inputEl.value = palItems[palIndex].name + (palItems[palIndex].hasArgs ? " " : "");
-    updatePalette(); e.preventDefault(); return;
-  }
-  if (e.key === "Enter") {
-    e.preventDefault();
-    if (paletteOpen && palItems[palIndex] && v.trim() === palItems[palIndex].name && palItems[palIndex].hasArgs) {
-      inputEl.value = palItems[palIndex].name + " ";
-      updatePalette(); return;  // 需要参数的命令：先补全再让用户填
-    }
-    hidePalette();
-    if (v.startsWith("/")) execLine(v.trim());
-    else submitTask(v.trim());
-  }
-});
-
-let aborting = false;
-async function listenEvents() {
-  const es = new EventSource("/api/events");
-  es.onmessage = (e) => {
-    const ev = JSON.parse(e.data);
-    if (ev.kind === "text") add("think", "│ " + ev.text);
-    else if (ev.kind === "tool") {
-      const det = document.createElement("details");
-      det.className = "tool-details";
-      const status = ev.success ? '<span class="ok">✓</span>' : '<span class="fail">✗</span>';
-      det.innerHTML = "<summary>" + status + " step " + ev.step + "  " +
-        escHtml(ev.tool) + (ev.target ? "  <b>" + escHtml(ev.target) + "</b>" : "") + "</summary>" +
-        '<div class="body">' + escHtml(ev.detail ? ("error: " + ev.detail + "
-") : "") +
-        (ev.preview || "(无输出)") + "</div>";
-      feed.appendChild(det); scrollFeed(nearBottom());
-    }
-    else if (ev.kind === "turn") {
-      add("turn", "── turn " + ev.step + " ──");
-      footerTokens.textContent = "tokens: " + (ev.tokens || 0);
-      footerSteps.textContent = "steps: " + ev.step;
-    }
-    else if (ev.kind === "answer") {
-      const div = document.createElement("div");
-      div.className = "answer";
-      div.appendChild(renderMarkdown(ev.answer));
-      feed.appendChild(div); scrollFeed(nearBottom());
-    }
-    else if (ev.kind === "error") add("error", ev.error);
-    else if (ev.kind === "status") add("turn", ev.message);
-    else if (ev.kind === "done") { es.close(); setRunning(false); loadSessions(); }
-  };
-  es.onerror = () => { es.close(); setRunning(false); };
-}
-
 async function abort() {
-  if (aborting) return; aborting = true;
   await fetch("/api/abort", { method: "POST" });
   add("turn", "■ 停止请求已发送…");
-  setTimeout(() => aborting = false, 1500);
 }
 
+/* ── 会话列表 ── */
+async function loadSessions() {
+  const resp = await fetch("/api/sessions");
+  const data = await resp.json();
+  const box = document.getElementById("sessions");
+  box.innerHTML = "";
+  (data.sessions || []).forEach(s => {
+    const b = document.createElement("button");
+    b.className = "session";
+    b.textContent = s.task || s.name;
+    b.onclick = () => { inputEl.value = "继续之前的任务：" + s.task; inputEl.focus(); };
+    box.appendChild(b);
+  });
+}
+
+/* ── 文件面板 ── */
+function showTab(tab) {
+  document.getElementById("pane-sessions").style.display = tab === "sessions" ? "flex" : "none";
+  document.getElementById("pane-files").style.display = tab === "files" ? "flex" : "none";
+  document.getElementById("tab-sessions").style.borderColor = tab === "sessions" ? "#4fc3f7" : "#2a2e36";
+  document.getElementById("tab-files").style.borderColor = tab === "files" ? "#4fc3f7" : "#2a2e36";
+  if (tab === "files") loadFiles();
+}
+async function loadFiles(dir) {
+  const tree = document.getElementById("filetree");
+  tree.innerHTML = '<div style="color:#555e6a; font-size:12px;">加载中…</div>';
+  const ws = (await (await fetch("/api/workspace")).json()).workspace;
+  const target = dir || ws;
+  const data = await (await fetch("/api/fs/browse?path=" + encodeURIComponent(target))).json();
+  const fl = await (await fetch("/api/files?path=" + encodeURIComponent(target))).json();
+  tree.innerHTML = "";
+  if (data.parent !== null && !data.drives) {
+    const up = document.createElement("button");
+    up.className = "session"; up.textContent = "↰ ..";
+    up.onclick = () => loadFiles(data.parent);
+    tree.appendChild(up);
+  }
+  data.dirs.forEach(d => {
+    const b = document.createElement("button");
+    b.className = "session"; b.textContent = "📁 " + d.split(/[\\/]/).pop();
+    b.onclick = () => loadFiles(d);
+    tree.appendChild(b);
+  });
+  fl.files.forEach(f => {
+    const b = document.createElement("button");
+    b.className = "session"; b.textContent = "📄 " + f;
+    b.onclick = () => viewFile(target + "/" + f);
+    tree.appendChild(b);
+  });
+}
+async function viewFile(path) {
+  const r = await fetch("/api/file?path=" + encodeURIComponent(path));
+  if (!r.ok) { const e = await r.json().catch(() => ({})); add("error", e.detail || "无法查看"); return; }
+  const d = await r.json();
+  document.getElementById("fileTitle").textContent = d.path + "  (" + d.size + " 字符)";
+  document.getElementById("fileBody").textContent = d.content + (d.truncated ? "\n…[已截断]" : "");
+  document.getElementById("fileModal").style.display = "block";
+}
+function closeFileViewer() { document.getElementById("fileModal").style.display = "none"; }
+
+/* ── 打开文件夹 ── */
+let browseCurrent = "";
 async function openFolderDialog() {
   document.getElementById("folderModal").style.display = "block";
   browseFolder("");
 }
 function closeFolderDialog() { document.getElementById("folderModal").style.display = "none"; }
-let browseCurrent = "";
 async function browseFolder(path) {
-  const resp = await fetch("/api/fs/browse?path=" + encodeURIComponent(path));
-  const data = await resp.json();
+  const data = await (await fetch("/api/fs/browse?path=" + encodeURIComponent(path))).json();
   browseCurrent = data.current;
   document.getElementById("crumb").textContent = data.current || "（选择盘符）";
   const list = document.getElementById("dirList");
@@ -452,10 +325,10 @@ async function browseFolder(path) {
     list.appendChild(b);
   });
 }
-async function upFolder() { browseFolder(document.getElementById("crumb").textContent.replace(/\$/, "")); }
+async function upFolder() { browseFolder(document.getElementById("crumb").textContent.replace(/\\$/, "")); }
 async function chooseFolder() {
   const resp = await fetch("/api/workspace", { method: "POST",
-    headers: {"Content-Type": "application/json"},
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path: browseCurrent }) });
   const data = await resp.json();
   if (data.ok) {
@@ -469,78 +342,159 @@ async function loadWorkspace() {
   document.getElementById("ws").textContent = "工作区: " + r.workspace;
 }
 
-function showTab(tab) {
-  document.getElementById("pane-sessions").style.display = tab === "sessions" ? "flex" : "none";
-  document.getElementById("pane-files").style.display = tab === "files" ? "flex" : "none";
-  document.getElementById("tab-sessions").style.borderColor =
-    tab === "sessions" ? "#4fc3f7" : "#2a2e36";
-  document.getElementById("tab-files").style.borderColor =
-    tab === "files" ? "#4fc3f7" : "#2a2e36";
-  if (tab === "files") loadFiles();
-}
-
-async function loadFiles(dir) {
-  const tree = document.getElementById("filetree");
-  tree.innerHTML = '<div style="color:#555e6a;font-size:12px;">加载中…</div>';
-  const ws = (await (await fetch("/api/workspace")).json()).workspace;
-  const data = await (await fetch("/api/fs/browse?path=" + encodeURIComponent(dir || ws))).json();
-  tree.innerHTML = "";
-  if (data.parent !== null && !data.drives) {
-    const up = document.createElement("button");
-    up.className = "session"; up.textContent = "↰ ..";
-    up.onclick = () => loadFiles(data.parent);
-    tree.appendChild(up);
+/* ── 斜杠命令 ── */
+const COMMANDS = [
+  { name: "/help", desc: "显示命令帮助", hasArgs: false },
+  { name: "/status", desc: "显示运行状态与当前工作区", hasArgs: false },
+  { name: "/tools", desc: "列出模型可用的工具", hasArgs: false },
+  { name: "/model", desc: "切换模型（无参数显示在线列表，可按序号选择）", hasArgs: true },
+  { name: "/mode", desc: "切换执行模式 full/goal/plan/dry-run", hasArgs: true },
+  { name: "/goal", desc: "设置会话目标（注入后续每次运行）", hasArgs: true },
+  { name: "/sessions", desc: "列出会话（含任务预览）", hasArgs: false },
+  { name: "/resume", desc: "恢复会话（无参=最新；或会话序号）", hasArgs: true },
+  { name: "/clear", desc: "清空对话显示", hasArgs: false },
+];
+function renderPalette(items) {
+  palItems = items; palIndex = items.length ? 0 : -1;
+  paletteEl.innerHTML = "";
+  if (!items.length) {
+    paletteEl.innerHTML = '<div class="empty">没有匹配的命令</div>';
+  } else {
+    items.forEach((c, i) => {
+      const div = document.createElement("div");
+      div.className = "item" + (i === palIndex ? " active" : "");
+      div.innerHTML = '<span class="name">' + c.name + '</span><span class="desc">' + c.desc + '</span>';
+      div.onclick = () => pickPalette(c);
+      paletteEl.appendChild(div);
+    });
   }
-  data.dirs.forEach(d => {
-    const b = document.createElement("button");
-    b.className = "session"; b.textContent = "📁 " + d.split(/[\/]/).pop();
-    b.onclick = () => loadFiles(d);
-    tree.appendChild(b);
-  });
-  // 工作区根目录下的文件（深度 1）通过 browse 拿不到文件，改用 files 端点
-  const fl = await (await fetch("/api/files?path=" + encodeURIComponent(dir || ws))).json();
-  fl.files.forEach(f => {
-    const b = document.createElement("button");
-    b.className = "session"; b.textContent = "📄 " + f;
-    b.onclick = () => viewFile(f);
-    tree.appendChild(b);
-  });
+  paletteEl.style.display = "block";
 }
-
-async function viewFile(path) {
-  const r = await fetch("/api/file?path=" + encodeURIComponent(path));
-  if (!r.ok) { const e = await r.json().catch(() => ({})); add("error", e.detail || "无法查看"); return; }
-  const d = await r.json();
-  document.getElementById("fileTitle").textContent = d.path + "  (" + d.size + " 字符)";
-  document.getElementById("fileBody").textContent =
-    d.content + (d.truncated ? "
-…[已截断]" : "");
-  document.getElementById("fileModal").style.display = "block";
+function hidePalette() { paletteEl.style.display = "none"; palItems = []; palIndex = -1; }
+function movePalette(dir) {
+  if (!palItems.length) return;
+  palIndex = (palIndex + dir + palItems.length) % palItems.length;
+  [...paletteEl.querySelectorAll(".item")].forEach((el, i) => el.classList.toggle("active", i === palIndex));
 }
-function closeFileViewer() { document.getElementById("fileModal").style.display = "none"; }
-
-async function loadSessions() {
-  const box = document.getElementById("sessions");
-  const resp = await fetch("/api/sessions");
-  const data = await resp.json();
-  box.innerHTML = "";
-  (data.sessions || []).forEach(s => {
-    const b = document.createElement("button");
-    b.className = "session";
-    b.textContent = s.task || s.name;
-    b.onclick = () => {
-      document.getElementById("task").value = "继续之前的任务：" + s.task;
-    };
-    box.appendChild(b);
-  });
+function pickPalette(c) {
+  if (c.hasArgs) { inputEl.value = c.name + " "; hidePalette(); updatePalette(); inputEl.focus(); }
+  else { inputEl.value = c.name; hidePalette(); execLine(c.name); }
 }
-loadSessions();
-loadWorkspace();
-const ta = document.getElementById("task");
-ta.addEventListener("input", () => {
-  ta.style.height = "auto";
-  ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
+function updatePalette() {
+  const v = inputEl.value;
+  if (!v.startsWith("/") || running) { hidePalette(); return; }
+  const token = v.split(/\s+/)[0];
+  renderPalette(COMMANDS.filter(c => c.name.startsWith(token)));
+}
+inputEl.addEventListener("input", () => {
+  inputEl.style.height = "auto";
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + "px";
+  updatePalette();
 });
+inputEl.addEventListener("keydown", (e) => {
+  const paletteOpen = paletteEl.style.display === "block";
+  if (e.key === "Escape") {
+    if (paletteOpen) { hidePalette(); e.preventDefault(); return; }
+    if (running) { abort(); e.preventDefault(); }
+    return;
+  }
+  if (paletteOpen && e.key === "ArrowDown") { movePalette(1); e.preventDefault(); return; }
+  if (paletteOpen && e.key === "ArrowUp") { movePalette(-1); e.preventDefault(); return; }
+  if (e.key === "Tab" && paletteOpen && palItems[palIndex]) {
+    inputEl.value = palItems[palIndex].name + (palItems[palIndex].hasArgs ? " " : "");
+    updatePalette(); e.preventDefault(); return;
+  }
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    const v = inputEl.value.trim();
+    if (!v) return;
+    if (v.startsWith("/")) {
+      if (paletteOpen && palItems[palIndex] && v === palItems[palIndex].name && palItems[palIndex].hasArgs) {
+        inputEl.value = v + " "; updatePalette(); return;
+      }
+      hidePalette(); add("user", v); execLine(v); inputEl.value = ""; inputEl.style.height = "auto";
+      return;
+    }
+    hidePalette(); submitTask(v);
+  }
+});
+
+/* ── 命令执行 ── */
+async function execLine(line) {
+  const parts = line.split(/\s+/);
+  const cmd = parts[0], arg = parts.slice(1).join(" ");
+  if (cmd === "/help") {
+    const card = add("answer", "");
+    card.innerHTML = "<b>命令列表</b><br>" +
+      COMMANDS.map(c => c.name + " — " + c.desc).join("<br>");
+    card.style.whiteSpace = "pre-wrap";
+  } else if (cmd === "/status") {
+    const s = await (await fetch("/api/status")).json();
+    add("answer", "运行中: " + s.running + " | 模型: " + s.model +
+      " | 模式: " + s.mode + "\n工作区: " + s.workspace +
+      (sessionGoal ? "\n会话目标: " + sessionGoal : ""));
+  } else if (cmd === "/tools") {
+    const d = await (await fetch("/api/tools")).json();
+    const card = add("answer", "");
+    card.innerHTML = "<b>模型可用工具 (" + d.tools.length + ")</b><br>" +
+      d.tools.map(t => "  " + t.name + " — " + t.description).join("<br>");
+    card.style.whiteSpace = "pre-wrap";
+  } else if (cmd === "/model") {
+    if (!arg) {
+      const d = await (await fetch("/api/models")).json();
+      const cur = document.getElementById("model").value;
+      if (d.models.length) {
+        if (!d.models.includes(cur)) document.getElementById("model").value = d.models[0];
+        add("answer", "在线模型:\n" + d.models.map(m =>
+          (m === document.getElementById("model").value ? "  <- " : "  ") + m).join("\n"));
+      } else add("error", "在线模型列表不可用");
+    } else {
+      document.getElementById("model").value = arg;
+      add("answer", "模型已切换: " + arg + "（下次运行生效）");
+    }
+  } else if (cmd === "/mode") {
+    if (["full", "goal", "plan", "dry-run"].includes(arg)) {
+      document.getElementById("mode").value = arg;
+      add("answer", "模式已切换: " + arg);
+    } else add("answer", "当前模式: " + document.getElementById("mode").value +
+      "（用法: /mode full|goal|plan|dry-run）");
+  } else if (cmd === "/goal") {
+    if (arg === "clear") { sessionGoal = ""; add("answer", "会话目标已清除"); }
+    else if (arg) { sessionGoal = arg; add("answer", "会话目标已设置: " + arg + "\n将随每次运行注入系统提示"); }
+    else add("answer", sessionGoal ? "当前会话目标: " + sessionGoal : "未设置（用法: /goal <text>）");
+  } else if (cmd === "/sessions") {
+    const d = await (await fetch("/api/sessions")).json();
+    const card = add("answer", "");
+    card.innerHTML = d.sessions.length
+      ? "<b>会话列表:</b><br>" + d.sessions.map((s, i) => (i + 1) + ". " + s.task).join("<br>")
+      : "没有会话——先运行一次任务";
+    card.style.whiteSpace = "pre-wrap";
+  } else if (cmd === "/resume") {
+    setRunning(true);
+    const resp = await fetch("/api/resume", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task: arg || "继续之前的任务", goal: sessionGoal, resume: "" }) });
+    if (!resp.ok) {
+      add("error", (await resp.json().catch(() => ({}))).detail || "恢复失败");
+      setRunning(false); return;
+    }
+    listenEvents();
+  } else if (cmd === "/clear") {
+    feed.innerHTML = "";
+  } else {
+    add("error", "未知命令: " + cmd + "（/help 查看命令列表）");
+  }
+}
+
+
+/* ── 工作区显示 ── */
+async function loadWorkspaceData() {
+  const r = await (await fetch("/api/workspace")).json();
+  document.getElementById("ws").textContent = "工作区: " + r.workspace;
+}
+
+loadSessions();
+loadWorkspaceData();
 </script>
 </body>
 </html>
