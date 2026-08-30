@@ -769,12 +769,25 @@ function listenEvents(tab) {
 }
 
 /* ═══════════ 运行 / 停止 ═══════════ */
+function continueFromHistory(tab) {
+  // 从"历史回放模式"转为"续接对话"：保留回放内容，隐藏历史工具条
+  tab.viewingHistory = false;
+  document.getElementById("historyBar").style.display = "none";
+  document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
+  addTabMsg(tab, "turn", "📜 已续接该会话——新对话将追加到同一历史记录");
+}
+
 async function submitTask(task) {
   const tab = activeTab();
   if (!tab || tab.running || !task) return;
-  if (tab.viewingHistory) closeHistory(tab);
-  const w = tab.feedEl.querySelector("#welcome");
-  if (w) w.remove();
+  // 查看历史会话时发消息 = 续接该会话（resume 管线，历史上下文带入）
+  const isHistoryContinue = tab.viewingHistory && tab.sessionFile;
+  if (isHistoryContinue) {
+    continueFromHistory(tab);
+  } else {
+    const w = tab.feedEl.querySelector("#welcome");
+    if (w) w.remove();
+  }
   const um = addTabMsg(tab, "user", task);
   const ops = document.createElement("div");
   ops.className = "msg-ops";
@@ -794,10 +807,14 @@ async function submitTask(task) {
   tab.btn.querySelector(".t-title").textContent = tab.title;
   const mode = document.getElementById("mode").value;
   const model = document.getElementById("model").value;
-  const resp = await fetch("/api/run", {
+  const endpoint = isHistoryContinue ? "/api/resume" : "/api/run";
+  const resp = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ task, mode, model, goal: AppState.sessionGoal })
+    body: JSON.stringify({
+      task, mode, model, goal: AppState.sessionGoal,
+      resume: isHistoryContinue ? tab.sessionFile : ""
+    })
   });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: "未知错误" }));
@@ -833,6 +850,10 @@ function handleSubmit() {
 async function openSession(file) {
   const tab = activeTab();
   if (!tab) return;
+  if (tab.running) {
+    addTabMsg(tab, "error", "当前会话正在运行——请先停止或新建会话再查看历史");
+    return;
+  }
   const resp = await fetch("/api/session?file=" + encodeURIComponent(file));
   if (!resp.ok) {
     const e = await resp.json().catch(() => ({}));
@@ -1628,6 +1649,9 @@ async function execLine(line) {
   } else if (cmd === "/clear") {
     tab.feedEl.innerHTML = "";
     tab.turnEl = null; tab.streamEl = null; tab.pendingEl = null;
+    tab.viewingHistory = false; tab.sessionFile = null; tab.sessionData = null;
+    document.getElementById("historyBar").style.display = "none";
+    document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
     renderWelcome(tab);
   } else {
     addTabMsg(tab, "error", "未知命令: " + cmd + "（/help 查看命令列表）");
