@@ -318,6 +318,23 @@ def api_session(file: str = ""):
             "meta": data.get("meta")}
 
 
+@app.delete("/api/session")
+def api_session_delete(file: str = ""):
+    """删除一个历史会话文件（仅供 UI 会话管理）。"""
+    session_dir = Path.home() / ".coder_sessions"
+    if not file:
+        raise HTTPException(status_code=400, detail="file 参数不能为空")
+    p = Path(file)
+    try:
+        p.resolve().relative_to(session_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="路径越界")
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="会话不存在")
+    p.unlink(missing_ok=True)
+    return {"ok": True, "file": str(p)}
+
+
 @app.get("/api/commands")
 def api_commands():
     """返回可用命令列表（供前端动态加载）。"""
