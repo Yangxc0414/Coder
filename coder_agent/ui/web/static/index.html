@@ -874,8 +874,12 @@ function appendToolToTurn(tab, ev) {
     (ev.detail ? "<span class='err-label'>" + (isPolicy ? "policy" : "error") + "</span>\n" + escHtml(ev.detail) + "\n" : "") +
     (ev.preview || "(无输出)") + "</div>";
   body.appendChild(det);
+  // turn 摘要行显示动作进展（不展开也能看到每步做了什么）
   const n = body.querySelectorAll("details.tool-details").length;
-  tab.turnEl.querySelector(".turn-count").textContent = n + " 步";
+  const summary = tab.turnEl.querySelector(".turn-count");
+  summary.textContent = n + " 步 · " + (ev.success ? "✓" : "✗") + " " + ev.tool +
+    (ev.target ? " → " + ev.target.slice(0, 24) : "");
+  summary.title = summary.textContent;
   scrollFeedEl(tab.feedEl, nearBottom(tab.feedEl));
 }
 function appendVerifierCard(tab, ev) {
@@ -944,6 +948,7 @@ function trackTool(tab, ev) {
 
 /* ═══════════ SSE 事件渲染（按 tab 路由） ═══════════ */
 function appendStream(tab, delta) {
+  if (!delta) return;  // 防御：空增量不创建空光标框
   if (!tab.streamEl) {
     const el = document.createElement("div");
     el.className = "stream-box";
