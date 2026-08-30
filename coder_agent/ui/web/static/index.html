@@ -116,11 +116,14 @@
 
   /* ── 斜杠命令面板 ── */
   #palette { display: none; position: absolute; bottom: 70px; left: 16px; right: 16px; background: #111418; border: 1px solid #1e2329; border-radius: 10px; max-height: 280px; overflow-y: auto; z-index: 40; box-shadow: 0 -4px 24px rgba(0,0,0,.5); }
+  #palette .group-label { padding: 8px 14px 2px; font-size: 10px; color: #3d444d; letter-spacing: 1px; text-transform: uppercase; }
   #palette .item { padding: 10px 14px; cursor: pointer; display: flex; gap: 12px; align-items: center; transition: background 0.15s; }
   #palette .item:hover, #palette .item.active { background: #1a1f26; }
   #palette .item .name { color: #4fc3f7; font-family: Consolas, monospace; font-size: 12px; min-width: 120px; }
   #palette .item .desc { color: #8e9aa8; font-size: 11px; }
+  #palette .item .kbd { color: #3d444d; font-size: 10px; margin-left: auto; border: 1px solid #2a2e36; border-radius: 3px; padding: 1px 5px; }
   #palette .empty { padding: 12px 14px; color: #3d444d; font-size: 12px; }
+  #paramHint { display: none; font-size: 11px; color: #4fc3f7; padding: 2px 4px; }
 
   /* ── 输入框 ── */
   form { display: flex; gap: 10px; padding: 12px 16px; border-top: 1px solid #1e2329; background: #111418; flex-direction: column; }
@@ -220,12 +223,13 @@
   </div>
 
   <form id="form" onsubmit="return false;">
+    <div id="paramHint"></div>
     <div class="input-row">
-      <textarea id="task" rows="1" placeholder="输入编程任务… Enter 发送 / Shift+Enter 换行" autocomplete="off"></textarea>
+      <textarea id="task" rows="1" placeholder="输入编程任务… Enter 发送 / Shift+Enter 换行 / 输入 / 呼出命令面板" autocomplete="off"></textarea>
       <button type="button" class="primary" id="send" onclick="handleSubmit()">运行</button>
       <button type="button" class="stop" id="stop" onclick="abort()">■ 停止</button>
     </div>
-    <div class="input-hint" id="inputHint">⏎ 发送 · Shift+⏎ 换行 · / 命令面板 · Esc 停止</div>
+    <div class="input-hint" id="inputHint">⏎ 发送 · Shift+⏎ 换行 · / 命令面板 · ↑↓ 选择 · Tab 补全 · Esc 关闭</div>
   </form>
 </main>
 
@@ -776,8 +780,13 @@ document.getElementById("model").addEventListener("focus", () => {
 });
 
 document.addEventListener("click", (e) => {
+  // 点击输入框外：关闭模型下拉与命令面板
   if (!e.target.closest(".input-wrapper")) {
     document.getElementById("modelDropdown").style.display = "none";
+  }
+  if (!e.target.closest("#palette") && !e.target.closest("#task")) {
+    hidePalette();
+    hideParamHint();
   }
 });
 
@@ -839,7 +848,15 @@ async function loadCommands() {
   try {
     const resp = await fetch("/api/commands");
     const data = await resp.json();
-    AppState.commands = data.commands || [];
+    AppState.commands = (data.commands || []).map(c => ({
+      ...c,
+      argHint: {
+        "/model": "<模型名>，如 agnes-2.5-pro",
+        "/mode": "full | goal | plan | dry-run",
+        "/goal": "<目标描述>，或 clear 清除",
+        "/resume": "<会话序号>，空=最新",
+      }[c.name] || "",
+    }));
   } catch (e) {
     AppState.commands = [
       { name: "/help", desc: "显示命令帮助", hasArgs: false },
@@ -857,6 +874,15 @@ async function loadCommands() {
 
 let palItems = [], palIndex = -1;
 
+function showParamHint(text) {
+  const el = document.getElementById("paramHint");
+  el.textContent = text;
+  el.style.display = "block";
+}
+function hideParamHint() {
+  document.getElementById("paramHint").style.display = "none";
+}
+
 function renderPalette(items) {
   palItems = items;
   palIndex = items.length ? 0 : -1;
@@ -864,10 +890,13 @@ function renderPalette(items) {
   if (!items.length) {
     paletteEl.innerHTML = '<div class="empty">没有匹配的命令</div>';
   } else {
+    paletteEl.innerHTML = '<div class="group-label">命令</div>';
     items.forEach((c, i) => {
       const div = document.createElement("div");
       div.className = "item" + (i === palIndex ? " active" : "");
-      div.innerHTML = '<span class="name">' + escHtml(c.name) + '</span><span class="desc">' + escHtml(c.desc) + '</span>';
+      div.innerHTML = '<span class="name">' + escHtml(c.name) + '</span>' +
+        '<span class="desc">' + escHtml(c.desc) + '</span>' +
+        (c.hasArgs ? '<span class="kbd">参数</span>' : '<span class="kbd">⏎</span>');
       div.onclick = () => pickPalette(c);
       paletteEl.appendChild(div);
     });
@@ -887,20 +916,36 @@ function pickPalette(c) {
   if (c.hasArgs) {
     inputEl.value = c.name + " ";
     hidePalette();
-    updatePalette();
+    showParamHint("用法: " + c.desc + "（输入参数后按 Enter 执行）");
     inputEl.focus();
   } else {
     inputEl.value = c.name;
     hidePalette();
     execLine(c.name);
+    inputEl.value = "";
+    inputEl.style.height = "auto";
   }
+}
+
+function currentCommand() {
+  const v = inputEl.value;
+  if (!v.startsWith("/")) return null;
+  const token = v.split(/\s+/)[0];
+  return AppState.commands.find(c => c.name === token) || null;
 }
 
 function updatePalette() {
   const v = inputEl.value;
-  if (!v.startsWith("/") || AppState.running) { hidePalette(); return; }
+  if (AppState.running || !v.startsWith("/")) { hidePalette(); hideParamHint(); return; }
   const token = v.split(/\s+/)[0];
   renderPalette(AppState.commands.filter(c => c.name.startsWith(token)));
+  // 已完整输入命令名时显示参数提示
+  const cmd = AppState.commands.find(c => c.name === token);
+  if (cmd && cmd.hasArgs && v.trim() === cmd.name) {
+    showParamHint("用法: " + cmd.name + " " + (cmd.argHint || "<参数>") + "（Tab 继续输入，Enter 执行）");
+  } else if (!v.includes(" ")) {
+    hideParamHint();
+  }
 }
 
 /* ── 输入事件 ── */
@@ -913,35 +958,50 @@ inputEl.addEventListener("input", () => {
 inputEl.addEventListener("keydown", (e) => {
   const paletteOpen = paletteEl.style.display === "block";
   if (e.key === "Escape") {
-    if (paletteOpen) { hidePalette(); e.preventDefault(); return; }
+    if (paletteOpen) { hidePalette(); hideParamHint(); e.preventDefault(); return; }
     if (AppState.running) { abort(); e.preventDefault(); }
     return;
   }
   if (paletteOpen && e.key === "ArrowDown") { movePalette(1); e.preventDefault(); return; }
   if (paletteOpen && e.key === "ArrowUp") { movePalette(-1); e.preventDefault(); return; }
-  if (e.key === "Tab" && paletteOpen && palItems[palIndex]) {
-    inputEl.value = palItems[palIndex].name + (palItems[palIndex].hasArgs ? " " : "");
-    updatePalette();
+  if (paletteOpen && e.key === "Tab") {
+    if (palItems[palIndex]) {
+      inputEl.value = palItems[palIndex].name + (palItems[palIndex].hasArgs ? " " : "");
+      updatePalette();
+    }
     e.preventDefault();
     return;
   }
-  if (e.key === "Enter" && !e.shiftKey) {
+  if (e.key === "Enter") {
+    if (e.shiftKey) {
+      // Shift+Enter：换行（默认行为），保持输入框自动增长
+      e.preventDefault();
+      inputEl.value += "\n";
+      inputEl.style.height = "auto";
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + "px";
+      return;
+    }
+    // Enter：发送
     e.preventDefault();
     const v = inputEl.value.trim();
     if (!v) return;
     if (v.startsWith("/")) {
-      if (paletteOpen && palItems[palIndex] && v === palItems[palIndex].name && palItems[palIndex].hasArgs) {
-        inputEl.value = v + " ";
-        updatePalette();
+      const cmd = currentCommand();
+      const isComplete = cmd && (v === cmd.name || v.startsWith(cmd.name + " "));
+      if (paletteOpen && palItems[palIndex] && !isComplete) {
+        // 部分输入：Enter 选择高亮项（补全或执行）
+        pickPalette(palItems[palIndex]);
         return;
       }
       hidePalette();
+      hideParamHint();
       execLine(v);
       inputEl.value = "";
       inputEl.style.height = "auto";
       return;
     }
     hidePalette();
+    hideParamHint();
     submitTask(v);
   }
 });
