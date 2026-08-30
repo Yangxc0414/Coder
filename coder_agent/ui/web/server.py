@@ -182,22 +182,11 @@ def api_tools():
 
 @app.get("/api/models")
 def api_models():
-    import urllib.request
-
-    # 优先使用用户配置（~/.coder_config.json），其次环境变量
+    # 复用 LLMClient 的配置解析（用户配置 > 环境变量）与 HTTP 客户端
+    from coder_agent.llm.client import LLMClient
     m = get_manager()
-    base = (m.base_url or os.getenv("OPENAI_BASE_URL")
-            or "https://api.agnes-ai.cn/v1").rstrip("/")
-    key = m.api_key or os.getenv("OPENAI_API_KEY") or ""
-    try:
-        req = urllib.request.Request(
-            f"{base}/models", headers={"Authorization": f"Bearer {key}"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-        models = sorted(str(md.get("id")) for md in data.get("data", []) if md.get("id"))
-        return {"models": models}
-    except Exception:
-        return {"models": []}
+    client = LLMClient(model=m.model, api_key=m.api_key, base_url=m.base_url)
+    return {"models": client.list_models()}
 
 
 @app.get("/api/file")
@@ -408,7 +397,7 @@ def api_session(file: str = ""):
 
 def _session_stats(messages: list[dict]) -> dict:
     """历史会话统计：token 估算 / 轮次 / 工具调用分布 / 文件读写。"""
-    import json as _json
+    from coder_agent.journal import extract_tool_actions
     from coder_agent.llm.tokenizer import count_messages_tokens
 
     tools: dict[str, int] = {}
@@ -418,25 +407,18 @@ def _session_stats(messages: list[dict]) -> dict:
     for m in messages:
         if m.get("role") == "user":
             turns += 1
-        if m.get("role") != "assistant":
+    for action in extract_tool_actions(messages):
+        name = action["name"]
+        tools[name] = tools.get(name, 0) + 1
+        path = action["args"].get("path", "")
+        if not path:
             continue
-        for tc in m.get("tool_calls") or []:
-            fn = tc.get("function", {})
-            name = fn.get("name", "?")
-            tools[name] = tools.get(name, 0) + 1
-            try:
-                args = _json.loads(fn.get("arguments") or "{}")
-            except Exception:
-                args = {}
-            path = args.get("path", "") if isinstance(args, dict) else ""
-            if not path:
-                continue
-            if name in ("write_file", "edit_file", "append_file"):
-                if path not in writes:
-                    writes.append(path)
-            elif name == "read_file":
-                if path not in reads:
-                    reads.append(path)
+        if name in ("write_file", "edit_file", "append_file"):
+            if path not in writes:
+                writes.append(path)
+        elif name == "read_file":
+            if path not in reads:
+                reads.append(path)
     tokens_est = count_messages_tokens(messages) if messages else 0
     return {
         "messages": len(messages),
@@ -467,27 +449,9 @@ def api_session_delete(file: str = ""):
 
 @app.get("/api/commands")
 def api_commands():
-    """返回可用命令列表（供前端动态加载）。"""
-    return {
-        "commands": [
-            {"name": "/help", "desc": "显示命令帮助", "hasArgs": False},
-            {"name": "/status", "desc": "显示运行状态与当前工作区", "hasArgs": False},
-            {"name": "/tools", "desc": "列出模型可用的工具", "hasArgs": False},
-            {"name": "/model", "desc": "切换模型（无参数显示列表，可输入名称）", "hasArgs": True,
-             "argHint": "<模型名>，如 agnes-2.5-pro"},
-            {"name": "/mode", "desc": "切换执行模式 full/goal/plan/dry-run", "hasArgs": True,
-             "argHint": "full | goal | plan | dry-run"},
-            {"name": "/goal", "desc": "设置会话目标（注入后续每次运行）", "hasArgs": True,
-             "argHint": "<目标描述>，或 clear 清除"},
-            {"name": "/sessions", "desc": "列出会话（含任务预览）", "hasArgs": False},
-            {"name": "/resume", "desc": "恢复会话（无参=最新；或输入序号）", "hasArgs": True,
-             "argHint": "<会话序号>，空=最新"},
-            {"name": "/compact", "desc": "手动压缩最近一次运行的上下文", "hasArgs": False},
-            {"name": "/history", "desc": "显示最近一次运行的最近消息", "hasArgs": False},
-            {"name": "/trace", "desc": "显示最近一次运行的工具追踪摘要", "hasArgs": False},
-            {"name": "/clear", "desc": "清空对话显示", "hasArgs": False},
-        ]
-    }
+    """返回可用命令列表（供前端动态加载，与 CLI 共用同一份定义）。"""
+    from coder_agent.ui.commands import COMMANDS
+    return {"commands": COMMANDS}
 
 
 if __name__ == "__main__":

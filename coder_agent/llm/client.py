@@ -65,6 +65,18 @@ class LLMClient:
         self._client = OpenAI(**client_kwargs,
                               http_client=_httpx.Client(timeout=60.0))
 
+    def list_models(self) -> list[str]:
+        """列出当前端点可用的模型（复用同一配置解析与客户端）。
+
+        Web /api/models 与 CLI --list-models 共用，避免各自手写
+        base_url/api_key 解析和 urllib 请求。
+        """
+        try:
+            models = self._client.models.list()
+            return sorted(str(m.id) for m in models.data if m.id)
+        except Exception:
+            return []
+
     def chat(
         self,
         messages: list[dict],

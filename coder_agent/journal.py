@@ -114,13 +114,13 @@ def load_journal(path: str | Path) -> dict[str, Any]:
     return {"messages": messages, "meta": meta, "events": events}
 
 
-def replay_state(messages: list[dict], state: AgentState) -> None:
-    """Re-derive AgentState file tracking from journaled messages.
+def extract_tool_actions(messages: list[dict]) -> list[dict]:
+    """从消息中提取所有工具调用动作（name + 解析后的 args）。
 
-    Scans assistant tool_calls for read_file/write_file and restores
-    state.mark_file_read / mark_file_modified, so loop detection and the
-    system-prompt state injection work correctly after a resume.
+    供 replay_state（恢复文件追踪）与 Web 会话统计共用，
+    避免各处重复解析 tool_calls arguments。
     """
+    out: list[dict] = []
     for msg in messages:
         if msg.get("role") != "assistant":
             continue
@@ -133,10 +133,23 @@ def replay_state(messages: list[dict], state: AgentState) -> None:
                 args = {}
             if not isinstance(args, dict):
                 args = {}
-            path = args.get("path", "")
-            if not path:
-                continue
-            if name == "read_file":
-                state.mark_file_read(path)
-            elif name == "write_file":
-                state.mark_file_modified(path)
+            out.append({"name": name, "args": args})
+    return out
+
+
+def replay_state(messages: list[dict], state: AgentState) -> None:
+    """Re-derive AgentState file tracking from journaled messages.
+
+    Scans assistant tool_calls for read_file/write_file and restores
+    state.mark_file_read / mark_file_modified, so loop detection and the
+    system-prompt state injection work correctly after a resume.
+    """
+    for action in extract_tool_actions(messages):
+        name = action["name"]
+        path = action["args"].get("path", "")
+        if not path:
+            continue
+        if name == "read_file":
+            state.mark_file_read(path)
+        elif name == "write_file":
+            state.mark_file_modified(path)
