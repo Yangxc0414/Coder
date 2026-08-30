@@ -199,6 +199,8 @@ class TestLLMClientAttributes:
         assert llm.base_url == "https://example.com/v1"
 
     def test_base_url_from_env(self, monkeypatch):
+        import coder_agent.llm.client as client_mod
+        monkeypatch.setattr(client_mod, "_USER_CFG", {})  # 隔离用户配置
         monkeypatch.setenv("OPENAI_BASE_URL", "https://env.example.com/v1")
         llm = LLMClient(model="m")
         assert llm.base_url == "https://env.example.com/v1"

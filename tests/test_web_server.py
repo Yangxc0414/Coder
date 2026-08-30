@@ -35,11 +35,14 @@ class TestWorkspaceSwitch:
     def test_switch_blocked_while_running(self, client, tmp_path: Path):
         web_server._state["manager"] = web_server.RunManager(tmp_path)
         m = web_server.get_manager()
-        # 模拟运行中
+        # 模拟运行中：往会话表里放一个活跃线程
         import threading
+        from coder_agent.ui.web.runner import _RunSession
         block = threading.Event()
-        m._thread = threading.Thread(target=block.wait, daemon=True)
-        m._thread.start()
+        s = _RunSession("run_test")
+        s.thread = threading.Thread(target=block.wait, daemon=True)
+        s.thread.start()
+        m._sessions["run_test"] = s
         try:
             r = client.post("/api/workspace", json={"path": str(tmp_path)})
             assert r.status_code == 409

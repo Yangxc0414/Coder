@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Coder-Agent 客户端</title>
 <style>
-  /* ═══════════ 主题变量（暗色默认 / 亮色 data-theme="light"） ═══════════ */
   :root {
     --bg: #0d0f12; --bg2: #111418; --bg3: #1a1f26; --bg4: #14171c;
     --text: #e6e6e6; --muted: #8e9aa8; --faint: #3d444d;
@@ -15,8 +14,7 @@
     --user-bg: #1e3a5f; --answer-bg: #16321f; --answer-border: #2e7d32;
     --code-bg: #0d0f12; --code-text: #c8e1ff;
     --danger: #c62828; --danger-hover: #b71c1c;
-    --shadow: rgba(0,0,0,.5);
-    --scrollbar: #2a2e36;
+    --shadow: rgba(0,0,0,.5); --scrollbar: #2a2e36;
   }
   body[data-theme="light"] {
     --bg: #f5f6f8; --bg2: #ffffff; --bg3: #eef0f3; --bg4: #f0f2f5;
@@ -27,8 +25,7 @@
     --user-bg: #dbeafe; --answer-bg: #f0fdf4; --answer-border: #86efac;
     --code-bg: #f8fafc; --code-text: #1e293b;
     --danger: #dc2626; --danger-hover: #b91c1c;
-    --shadow: rgba(0,0,0,.15);
-    --scrollbar: #d3d8de;
+    --shadow: rgba(0,0,0,.15); --scrollbar: #d3d8de;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: "Segoe UI", "Microsoft YaHei", sans-serif; height: 100vh; display: flex; overflow: hidden; transition: background .25s, color .25s; }
@@ -61,7 +58,6 @@
   /* ── 主区域 ── */
   main { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); position: relative; }
 
-  /* ── 头部 ── */
   header { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: var(--bg2); }
   .header-group { display: flex; gap: 8px; align-items: center; position: relative; }
   .header-label { font-size: 12px; color: var(--faint); }
@@ -76,10 +72,27 @@
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
   .workspace-path { font-size: 11px; color: var(--faint); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+  /* ── 会话标签页 ── */
+  #tabBar { display: flex; gap: 4px; padding: 6px 12px 0; border-bottom: 1px solid var(--border); background: var(--bg2); align-items: flex-end; overflow-x: auto; flex-shrink: 0; }
+  #tabBar::-webkit-scrollbar { height: 3px; }
+  #tabBar::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 2px; }
+  .tab-btn { display: flex; align-items: center; gap: 6px; padding: 5px 10px 5px 12px; background: var(--bg3); border: 1px solid var(--border); border-bottom: none; border-radius: 8px 8px 0 0; font-size: 12px; color: var(--muted); cursor: pointer; white-space: nowrap; max-width: 210px; }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { background: var(--bg); color: var(--text); border-color: var(--border2); }
+  .tab-btn .t-dot { width: 6px; height: 6px; border-radius: 50%; background: transparent; flex-shrink: 0; }
+  .tab-btn.running .t-dot { background: var(--ok); animation: pulse 1.5s infinite; }
+  .tab-btn .t-title { overflow: hidden; text-overflow: ellipsis; }
+  .tab-btn .t-close { background: none; border: none; color: var(--faint); cursor: pointer; font-size: 13px; padding: 0 2px; flex-shrink: 0; }
+  .tab-btn .t-close:hover { color: var(--err); }
+  .tab-new { display: flex; align-items: center; gap: 4px; padding: 5px 12px; background: none; border: 1px dashed var(--border2); border-bottom: none; border-radius: 8px 8px 0 0; color: var(--faint); cursor: pointer; font-size: 12px; }
+  .tab-new:hover { color: var(--accent); border-color: var(--accent); }
+
   /* ── 对话流 ── */
-  #feed { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
-  #feed::-webkit-scrollbar { width: 6px; }
-  #feed::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
+  #feedArea { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
+  .tab-feed { display: none; flex: 1; overflow-y: auto; padding: 16px; flex-direction: column; gap: 10px; }
+  .tab-feed.active { display: flex; }
+  .tab-feed::-webkit-scrollbar { width: 6px; }
+  .tab-feed::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
   .message { max-width: 85%; animation: fadeIn .2s ease; position: relative; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
   .user { align-self: flex-end; background: var(--user-bg); border-radius: 12px 12px 2px 12px; padding: 10px 14px; font-size: 13px; line-height: 1.5; }
@@ -87,14 +100,11 @@
   .think { color: var(--muted); font-size: 12px; white-space: pre-wrap; border-left: 2px solid var(--border2); padding-left: 10px; margin: 4px 0; }
   .turn { align-self: center; color: var(--faint); font-size: 11px; padding: 4px 12px; }
   .error { align-self: flex-start; background: var(--danger); color: #fff; border-radius: 8px; padding: 10px 14px; font-size: 12px; }
-
-  /* 消息操作按钮（hover 显示） */
   .msg-ops { position: absolute; top: -10px; right: 6px; display: none; gap: 4px; z-index: 5; }
   .message:hover .msg-ops { display: flex; }
   .msg-ops button { background: var(--bg3); border: 1px solid var(--border); color: var(--muted); border-radius: 4px; font-size: 10px; padding: 2px 7px; cursor: pointer; box-shadow: 0 2px 6px var(--shadow); }
   .msg-ops button:hover { color: var(--accent); border-color: var(--accent); }
 
-  /* ── Turn 分组容器 ── */
   .turn-block { align-self: stretch; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg2); margin: 2px 0; }
   .turn-block summary { padding: 8px 14px; cursor: pointer; font-size: 12px; color: var(--muted); list-style: none; display: flex; align-items: center; gap: 8px; user-select: none; }
   .turn-block summary:hover { background: var(--bg4); }
@@ -122,7 +132,6 @@
   details.tool-details .res-label { color: var(--ok); margin: 8px 0 2px; font-weight: bold; }
   details.tool-details .err-label { color: var(--err); margin: 8px 0 2px; font-weight: bold; }
 
-  /* ── 历史会话视图工具栏 ── */
   #historyBar { display: none; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--bg2); font-size: 12px; color: var(--muted); align-items: center; gap: 10px; }
   #historyBar .back-btn { background: none; border: 1px solid var(--border2); color: var(--muted); border-radius: 6px; padding: 4px 10px; font-size: 11px; cursor: pointer; }
   #historyBar .back-btn:hover { border-color: var(--accent); color: var(--accent); }
@@ -131,7 +140,6 @@
   #historyBar .hist-actions button { background: none; border: 1px solid var(--border2); color: var(--muted); border-radius: 6px; padding: 4px 10px; font-size: 11px; cursor: pointer; }
   #historyBar .hist-actions button:hover { border-color: var(--accent); color: var(--accent); }
 
-  /* ── Markdown 渲染 ── */
   .md h1, .md h2, .md h3 { margin: 12px 0 8px; color: var(--text); font-weight: 600; }
   .md h1 { font-size: 18px; } .md h2 { font-size: 16px; } .md h3 { font-size: 14px; }
   .md p { margin: 8px 0; line-height: 1.6; }
@@ -143,7 +151,6 @@
   .copy-btn { position: absolute; top: 8px; right: 8px; background: var(--bg3); color: var(--faint); border: 1px solid var(--border); border-radius: 4px; font-size: 10px; padding: 3px 8px; cursor: pointer; transition: all .15s; }
   .copy-btn:hover { color: var(--accent); border-color: var(--accent); }
 
-  /* ── 底部栏 ── */
   #footer { padding: 8px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--faint); display: flex; gap: 16px; background: var(--bg2); align-items: center; }
   .footer-stat { display: flex; align-items: center; gap: 4px; }
   .footer-stat span { color: var(--faint); }
@@ -153,7 +160,6 @@
   .theme-btn { background: none; border: 1px solid var(--border2); color: var(--muted); border-radius: 6px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
   .theme-btn:hover { border-color: var(--accent); color: var(--accent); }
 
-  /* ── 斜杠命令面板 ── */
   #palette { display: none; position: absolute; bottom: 110px; left: 16px; right: 16px; background: var(--bg2); border: 1px solid var(--border2); border-radius: 10px; max-height: 300px; overflow-y: auto; z-index: 40; box-shadow: 0 -4px 24px var(--shadow); }
   #palette .group-label { padding: 8px 14px 2px; font-size: 10px; color: var(--faint); letter-spacing: 1px; text-transform: uppercase; }
   #palette .item { padding: 10px 14px; cursor: pointer; display: flex; gap: 12px; align-items: center; transition: background .15s; }
@@ -165,7 +171,6 @@
   #palette .empty { padding: 12px 14px; color: var(--faint); font-size: 12px; }
   #paramHint { display: none; font-size: 11px; color: var(--accent); padding: 2px 4px; }
 
-  /* ── 输入框 ── */
   form { display: flex; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--bg2); flex-direction: column; }
   .input-row { display: flex; gap: 10px; align-items: flex-end; }
   textarea { flex: 1; background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-family: inherit; font-size: 13px; line-height: 1.5; resize: none; overflow: hidden; max-height: 160px; transition: border-color .15s; }
@@ -178,7 +183,6 @@
   button.stop { background: var(--danger); color: #fff; border: none; border-radius: 8px; padding: 10px 16px; font-size: 13px; cursor: pointer; transition: all .15s; display: none; }
   button.stop:hover { background: var(--danger-hover); }
 
-  /* ── 模态框 ── */
   .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 50; backdrop-filter: blur(4px); }
   .modal-overlay.show { display: block; }
   .modal-content { background: var(--bg2); border: 1px solid var(--border2); border-radius: 12px; margin: 60px auto; padding: 20px; max-width: 600px; box-shadow: 0 12px 40px var(--shadow); }
@@ -202,7 +206,6 @@
   #modelDropdown .model-item.selected { color: var(--accent); font-weight: 600; }
   .input-wrapper { position: relative; }
 
-  /* ── 欢迎页 ── */
   #welcome { margin: auto; max-width: 620px; text-align: center; padding: 30px 20px; animation: fadeIn .4s ease; }
   .welcome-logo { font-size: 52px; margin-bottom: 8px; }
   .welcome h2 { font-size: 24px; color: var(--text); margin-bottom: 4px; }
@@ -220,7 +223,6 @@
   .shortcut-hint { font-size: 11px; color: var(--faint); line-height: 1.9; }
   .shortcut-hint b { color: var(--muted); font-family: Consolas, monospace; border: 1px solid var(--border2); border-radius: 3px; padding: 0 5px; margin-right: 4px; }
 
-  /* ── 活动面板 ── */
   #activityPanel { display: none; position: absolute; top: 0; right: 0; bottom: 0; width: 280px; background: var(--bg2); border-left: 1px solid var(--border); z-index: 20; flex-direction: column; animation: slideIn .2s ease; }
   #activityPanel.show { display: flex; }
   @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
@@ -245,15 +247,8 @@
   .act-goal { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 12px; color: var(--text); word-break: break-all; }
   .act-empty { color: var(--faint); font-size: 12px; text-align: center; padding: 30px 10px; }
 
-  /* ── 响应式 ── */
-  @media (max-width: 860px) {
-    aside { width: 200px; }
-    .workspace-path { display: none; }
-    #activityPanel { width: 100%; }
-  }
-  @media (max-width: 640px) {
-    aside { display: none; }
-  }
+  @media (max-width: 860px) { aside { width: 200px; } .workspace-path { display: none; } #activityPanel { width: 100%; } }
+  @media (max-width: 640px) { aside { display: none; } }
 </style>
 </head>
 <body>
@@ -281,7 +276,7 @@
   <header>
     <div class="header-group">
       <span class="header-label">模式</span>
-      <select id="mode" title="full: 完整执行 | goal: 目标驱动（注入会话目标）| plan: 先规划再执行 | dry-run: 只预览不落盘">
+      <select id="mode" title="full: 完整执行 | goal: 目标驱动 | plan: 先规划再执行 | dry-run: 只预览不落盘">
         <option value="full">full</option>
         <option value="goal">goal</option>
         <option value="plan">plan</option>
@@ -305,14 +300,17 @@
     <span class="workspace-path" id="ws"></span>
   </header>
 
+  <div id="tabBar">
+    <button class="tab-new" onclick="createTab()">＋ 新建会话</button>
+  </div>
   <div id="historyBar">
-    <button class="back-btn" onclick="closeHistory()">← 返回实时</button>
+    <button class="back-btn" onclick="closeHistory(Tabs.active)">← 返回实时</button>
     <span class="hist-title" id="histTitle"></span>
     <span class="hist-actions">
       <button onclick="downloadSession()">⤓ 导出</button>
     </span>
   </div>
-  <div id="feed"></div>
+  <div id="feedArea"></div>
   <div id="palette"></div>
 
   <div id="activityPanel">
@@ -328,7 +326,7 @@
     <div class="footer-stat"><span>mode:</span><span id="f-mode">full</span></div>
     <span id="goalBadge" title="点击清除会话目标">🎯 <span id="goalBadgeText"></span></span>
     <span class="footer-right">
-      <span>© Coder-Agent 自研 · 零框架</span>
+      <span>© Coder-Agent 自研 · 零框架 · 多会话并行</span>
       <button class="theme-btn" onclick="toggleTheme()" id="themeBtn2">🌙</button>
     </span>
   </div>
@@ -340,17 +338,13 @@
       <button type="button" class="primary" id="send" onclick="handleSubmit()">运行</button>
       <button type="button" class="stop" id="stop" onclick="abort()">■ 停止</button>
     </div>
-    <div class="input-hint" id="inputHint">⏎ 发送 · Shift+⏎ 换行 · / 命令面板 · Ctrl+Enter 发送 · Ctrl+K 清空 · Ctrl+L 主题 · Ctrl+, 设置</div>
+    <div class="input-hint" id="inputHint">⏎ 发送 · Shift+⏎ 换行 · / 命令面板 · Ctrl+T 新建会话 · Ctrl+W 关闭 · Ctrl+Tab 切换 · Ctrl+K 清空 · Ctrl+L 主题</div>
   </form>
 </main>
 
-<!-- 设置模态框 -->
 <div id="configModal" class="modal-overlay" onclick="if(event.target===this)closeConfigModal()">
   <div class="modal-content" style="max-width:460px;">
-    <div class="modal-header">
-      <b>⚙ 模型与 API 配置</b>
-      <button class="modal-close" onclick="closeConfigModal()">✕</button>
-    </div>
+    <div class="modal-header"><b>⚙ 模型与 API 配置</b><button class="modal-close" onclick="closeConfigModal()">✕</button></div>
     <div class="config-row">
       <label>模型（可直接输入名称）</label>
       <input type="text" id="cfg-model" list="cfgModelList" placeholder="agnes-2.5-flash">
@@ -374,13 +368,9 @@
   </div>
 </div>
 
-<!-- 文件夹选择器 -->
 <div id="folderModal" class="modal-overlay" onclick="if(event.target===this)closeFolderDialog()">
   <div class="modal-content">
-    <div class="modal-header">
-      <b>选择工作区文件夹</b>
-      <button class="modal-close" onclick="closeFolderDialog()">✕</button>
-    </div>
+    <div class="modal-header"><b>选择工作区文件夹</b><button class="modal-close" onclick="closeFolderDialog()">✕</button></div>
     <div id="crumb" style="font-size:12px;color:var(--accent);margin-bottom:12px;word-break:break-all;"></div>
     <div id="dirList"></div>
     <div style="display:flex;gap:8px;margin-top:16px;">
@@ -390,50 +380,31 @@
   </div>
 </div>
 
-<!-- 文件查看器 -->
 <div id="fileModal" class="modal-overlay" onclick="if(event.target===this)closeFileViewer()">
   <div class="modal-content" style="width:90%;height:80%;margin:40px auto;display:flex;flex-direction:column;">
-    <div class="modal-header">
-      <b id="fileTitle" style="word-break:break-all;"></b>
-      <button class="modal-close" onclick="closeFileViewer()">✕</button>
-    </div>
+    <div class="modal-header"><b id="fileTitle" style="word-break:break-all;"></b><button class="modal-close" onclick="closeFileViewer()">✕</button></div>
     <pre id="fileBody"></pre>
   </div>
 </div>
 
 <script>
-/* ═══════════ 状态管理 ═══════════ */
+/* ═══════════ 全局状态 ═══════════ */
 const AppState = {
-  running: false,
   sessionGoal: localStorage.getItem('coder_goal') || '',
   sessionCount: 0,
   commands: [],
   models: [],
-  es: null,
-  currentTurnEl: null,
-  viewingHistory: false,
-  currentSessionFile: null,
-  sessionData: null,   // 当前历史会话数据（导出用）
 };
-const Stats = { tokens: 0, steps: 0, tools: {}, writes: [], reads: [], lastToolAt: null };
-
-const feed = document.getElementById("feed");
+const Tabs = { list: [], active: null, seq: 0 };
 const inputEl = document.getElementById("task");
 const paletteEl = document.getElementById("palette");
+const feedArea = document.getElementById("feedArea");
 
 /* ═══════════ 工具函数 ═══════════ */
 function escHtml(s) { return s ? String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") : ""; }
-function nearBottom() { return feed.scrollHeight - feed.scrollTop - feed.clientHeight < 100; }
-function scrollFeed(force) { if (force || nearBottom()) feed.scrollTop = feed.scrollHeight; }
-function add(cls, text) {
-  const stick = nearBottom();
-  const div = document.createElement("div");
-  div.className = "message " + cls;
-  div.textContent = text;
-  feed.appendChild(div);
-  scrollFeed(stick || cls === "user");
-  return div;
-}
+function nearBottom(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < 100; }
+function scrollFeedEl(el, force) { if (force || nearBottom(el)) el.scrollTop = el.scrollHeight; }
+async function copyText(t) { try { await navigator.clipboard.writeText(t); return true; } catch (e) { return false; } }
 function parseArgs(argsStr) {
   try {
     const o = JSON.parse(argsStr || "{}");
@@ -444,20 +415,159 @@ function parseArgs(argsStr) {
     }).join("\n");
   } catch (e) { return argsStr; }
 }
-async function copyText(t) {
-  try { await navigator.clipboard.writeText(t); return true; } catch (e) { return false; }
-}
-function msgOps(btnText, fn) {
-  const wrap = document.createElement("div");
-  wrap.className = "msg-ops";
-  const b = document.createElement("button");
-  b.textContent = btnText;
-  b.onclick = fn;
-  wrap.appendChild(b);
-  return wrap;
+
+/* ═══════════ 标签页管理 ═══════════ */
+function activeTab() { return Tabs.active; }
+
+function createTab(title) {
+  const id = "t" + (++Tabs.seq);
+  const tab = {
+    id, title: title || "新会话",
+    runId: null, es: null, running: false,
+    turnEl: null,
+    stats: { tokens: 0, steps: 0, tools: {}, writes: [], reads: [] },
+    viewingHistory: false, sessionFile: null, sessionData: null,
+  };
+  // feed 容器
+  const feedEl = document.createElement("div");
+  feedEl.className = "tab-feed";
+  feedEl.id = "feed-" + id;
+  feedArea.appendChild(feedEl);
+  tab.feedEl = feedEl;
+  // tab 按钮
+  const btn = document.createElement("div");
+  btn.className = "tab-btn";
+  btn.innerHTML = '<span class="t-dot"></span><span class="t-title"></span><button class="t-close" title="关闭会话">×</button>';
+  btn.querySelector(".t-title").textContent = tab.title;
+  btn.querySelector(".t-close").onclick = (e) => { e.stopPropagation(); closeTab(id); };
+  btn.onclick = () => switchTab(id);
+  const newBtn = document.querySelector(".tab-new");
+  tabBar.insertBefore(btn, newBtn);
+  tab.btn = btn;
+  Tabs.list.push(tab);
+  switchTab(id);
+  renderWelcome(tab);
+  return tab;
 }
 
-/* ═══════════ Mini-Markdown 渲染 ═══════════ */
+function switchTab(id) {
+  const tab = Tabs.list.find(t => t.id === id);
+  if (!tab) return;
+  Tabs.list.forEach(t => {
+    t.feedEl.classList.toggle("active", t.id === id);
+    t.btn.classList.toggle("active", t.id === id);
+  });
+  Tabs.active = tab;
+  // 同步运行状态 UI
+  document.getElementById("state").textContent = tab.running ? "运行中…" : "空闲";
+  document.getElementById("statusDot").className = "status-dot" + (tab.running ? " running" : "");
+  document.getElementById("stop").style.display = tab.running ? "inline-block" : "none";
+  document.getElementById("send").disabled = tab.running;
+  document.getElementById("f-tokens").textContent = tab.stats.tokens;
+  document.getElementById("f-steps").textContent = tab.stats.steps;
+  document.getElementById("historyBar").style.display = tab.viewingHistory ? "flex" : "none";
+  if (tab.viewingHistory && tab.sessionData) {
+    document.getElementById("histTitle").textContent = "📜 " + (tab.sessionData.task || "历史会话");
+  }
+}
+
+function closeTab(id) {
+  const tab = Tabs.list.find(t => t.id === id);
+  if (!tab) return;
+  if (tab.running && tab.runId) {
+    fetch("/api/abort", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_id: tab.runId })
+    }).catch(() => {});
+  }
+  if (tab.es) tab.es.close();
+  tab.feedEl.remove();
+  tab.btn.remove();
+  Tabs.list = Tabs.list.filter(t => t.id !== id);
+  if (Tabs.active && Tabs.active.id === id) {
+    const next = Tabs.list[Tabs.list.length - 1] || null;
+    Tabs.active = next;
+    if (next) switchTab(next.id);
+    else createTab();
+  }
+}
+
+function setRunning(tab, v) {
+  tab.running = v;
+  tab.btn.classList.toggle("running", v);
+  if (Tabs.active && Tabs.active.id === tab.id) {
+    document.getElementById("state").textContent = v ? "运行中…" : "空闲";
+    document.getElementById("statusDot").className = "status-dot" + (v ? " running" : "");
+    document.getElementById("stop").style.display = v ? "inline-block" : "none";
+    document.getElementById("send").disabled = v;
+  }
+}
+
+function addTabMsg(tab, cls, text) {
+  const el = tab.feedEl;
+  const stick = nearBottom(el);
+  const div = document.createElement("div");
+  div.className = "message " + cls;
+  div.textContent = text;
+  el.appendChild(div);
+  scrollFeedEl(el, stick || cls === "user");
+  return div;
+}
+
+/* ═══════════ 主题 ═══════════ */
+function applyTheme(theme) {
+  document.body.dataset.theme = theme;
+  localStorage.setItem('coder_theme', theme);
+  const icon = theme === "light" ? "☀️" : "🌙";
+  document.getElementById("themeBtn").textContent = icon;
+  document.getElementById("themeBtn2").textContent = icon;
+}
+function toggleTheme() {
+  const cur = document.body.dataset.theme || "dark";
+  applyTheme(cur === "dark" ? "light" : "dark");
+}
+
+/* ═══════════ 欢迎页（每 tab 独立） ═══════════ */
+const FEATURES = [
+  { icon: "🔁", title: "ReAct 循环", desc: "思考→行动→观察，手写实现，无任何 agent 框架" },
+  { icon: "🚦", title: "PolicyGate 策略闸门", desc: "危险命令/越界写文件在执行前拦截" },
+  { icon: "📦", title: "三层上下文压缩", desc: "对话 / 工作区 / 长程记忆分层管理 token" },
+  { icon: "✅", title: "LLM Verifier 自校验", desc: "运行结果自动验证，失败自动修复重试" },
+  { icon: "📜", title: "Session Journal", desc: "消息全量落盘，断点续跑不丢失进度" },
+  { icon: "🧠", title: "Memory + Task 委托", desc: "记忆工具 + 子任务分解并行执行" },
+];
+const SUGGESTS = [
+  "扫描当前目录结构并总结这个项目",
+  "运行测试并修复所有失败项",
+  "给项目根目录写一个简洁的 README.md",
+  "检查代码中是否有明显的 bug 并修复",
+];
+function renderWelcome(tab) {
+  if (tab.feedEl.children.length) return;
+  const w = document.createElement("div");
+  w.id = "welcome";
+  w.innerHTML = '<div class="welcome-logo">🧠</div>' +
+    "<h2>Coder-Agent</h2>" +
+    '<div class="sub">自研编码智能体 · 零框架 · 多会话并行 · 可答辩</div>' +
+    '<div class="feature-grid">' + FEATURES.map(f =>
+      '<div class="feature-card"><div class="fc-icon">' + f.icon + '</div>' +
+      '<div class="fc-title">' + f.title + '</div><div class="fc-desc">' + f.desc + '</div></div>'
+    ).join("") + '</div>' +
+    '<div class="suggest-label">试一试：</div>' +
+    '<div class="suggest-chips">' + SUGGESTS.map(s =>
+      '<button class="chip" data-s="' + escHtml(s) + '">' + escHtml(s) + '</button>'
+    ).join("") + '</div>' +
+    '<div class="shortcut-hint">' +
+    "<b>Enter</b> 发送 &nbsp; <b>/</b> 命令面板 &nbsp; <b>Ctrl+T</b> 新会话 &nbsp; <b>Ctrl+Tab</b> 切换 &nbsp; <b>Ctrl+W</b> 关闭 &nbsp; <b>Ctrl+L</b> 主题" +
+    '</div>';
+  w.querySelectorAll(".chip").forEach(c => {
+    c.onclick = () => { inputEl.value = c.dataset.s; inputEl.focus(); };
+  });
+  tab.feedEl.appendChild(w);
+}
+
+/* ═══════════ Mini-Markdown ═══════════ */
 function renderMarkdown(md) {
   if (!md) return document.createElement("div");
   const blocks = md.split(/\n```/);
@@ -497,85 +607,22 @@ function renderMarkdown(md) {
   return wrap;
 }
 
-/* ═══════════ 主题切换 ═══════════ */
-function applyTheme(theme) {
-  document.body.dataset.theme = theme;
-  localStorage.setItem('coder_theme', theme);
-  const icon = theme === "light" ? "☀️" : "🌙";
-  document.getElementById("themeBtn").textContent = icon;
-  document.getElementById("themeBtn2").textContent = icon;
-}
-function toggleTheme() {
-  const cur = document.body.dataset.theme || "dark";
-  applyTheme(cur === "dark" ? "light" : "dark");
-}
-
-/* ═══════════ 欢迎页 ═══════════ */
-const FEATURES = [
-  { icon: "🔁", title: "ReAct 循环", desc: "思考→行动→观察，手写实现，无任何 agent 框架" },
-  { icon: "🚦", title: "PolicyGate 策略闸门", desc: "危险命令/越界写文件在执行前拦截" },
-  { icon: "📦", title: "三层上下文压缩", desc: "对话 / 工作区 / 长程记忆分层管理 token" },
-  { icon: "✅", title: "LLM Verifier 自校验", desc: "运行结果自动验证，失败自动修复重试" },
-  { icon: "📜", title: "Session Journal", desc: "消息全量落盘，断点续跑不丢失进度" },
-  { icon: "🧠", title: "Memory + Task 委托", desc: "记忆工具 + 子任务分解并行执行" },
-];
-const SUGGESTS = [
-  "扫描当前目录结构并总结这个项目",
-  "运行测试并修复所有失败项",
-  "给项目根目录写一个简洁的 README.md",
-  "检查代码中是否有明显的 bug 并修复",
-];
-function renderWelcome() {
-  if (feed.children.length) return;
-  const w = document.createElement("div");
-  w.id = "welcome";
-  w.innerHTML = '<div class="welcome-logo">🧠</div>' +
-    "<h2>Coder-Agent</h2>" +
-    '<div class="sub">自研编码智能体 · 零框架 · 可答辩 · 可演示</div>' +
-    '<div class="feature-grid">' + FEATURES.map(f =>
-      '<div class="feature-card"><div class="fc-icon">' + f.icon + '</div>' +
-      '<div class="fc-title">' + f.title + '</div><div class="fc-desc">' + f.desc + '</div></div>'
-    ).join("") + '</div>' +
-    '<div class="suggest-label">试一试：</div>' +
-    '<div class="suggest-chips">' + SUGGESTS.map(s =>
-      '<button class="chip" data-s="' + escHtml(s) + '">' + escHtml(s) + '</button>'
-    ).join("") + '</div>' +
-    '<div class="shortcut-hint">' +
-    "<b>Enter</b> 发送 &nbsp; <b>Shift+Enter</b> 换行 &nbsp; <b>/</b> 命令面板 &nbsp; " +
-    "<b>Ctrl+K</b> 清空 &nbsp; <b>Ctrl+L</b> 主题 &nbsp; <b>Ctrl+O</b> 文件夹 &nbsp; <b>Ctrl+,</b> 设置" +
-    '</div>';
-  w.querySelectorAll(".chip").forEach(c => {
-    c.onclick = () => { inputEl.value = c.dataset.s; inputEl.focus(); };
-  });
-  feed.appendChild(w);
-}
-
-/* ═══════════ 运行状态 ═══════════ */
-function setRunning(v) {
-  AppState.running = v;
-  document.getElementById("state").textContent = v ? "运行中…" : "空闲";
-  document.getElementById("statusDot").className = "status-dot" + (v ? " running" : "");
-  document.getElementById("stop").style.display = v ? "inline-block" : "none";
-  document.getElementById("send").disabled = v;
-  document.getElementById("f-mode").textContent = document.getElementById("mode").value;
-}
-
-/* ═══════════ Turn 容器 ═══════════ */
-function beginTurn(step) {
+/* ═══════════ Turn 容器（每 tab 独立） ═══════════ */
+function beginTurn(tab, step) {
   const det = document.createElement("details");
   det.className = "turn-block";
   det.open = true;
   det.innerHTML = "<summary><span class='turn-badge'>Turn " + step + "</span>" +
     "<span class='turn-count'>0 步</span></summary><div class='turn-body'></div>";
-  if (AppState.currentTurnEl) AppState.currentTurnEl.open = false;
-  feed.appendChild(det);
-  AppState.currentTurnEl = det;
-  scrollFeed(true);
+  if (tab.turnEl) tab.turnEl.open = false;
+  tab.feedEl.appendChild(det);
+  tab.turnEl = det;
+  scrollFeedEl(tab.feedEl, true);
   return det.querySelector(".turn-body");
 }
-function appendToolToTurn(ev) {
-  if (!AppState.currentTurnEl) beginTurn(ev.step || 1);
-  const body = AppState.currentTurnEl.querySelector(".turn-body");
+function appendToolToTurn(tab, ev) {
+  if (!tab.turnEl) beginTurn(tab, ev.step || 1);
+  const body = tab.turnEl.querySelector(".turn-body");
   const det = document.createElement("details");
   det.className = "tool-details";
   const mark = ev.success ? '<span class="ok">✓</span>' : '<span class="fail">✗</span>';
@@ -587,137 +634,101 @@ function appendToolToTurn(ev) {
     (ev.preview || "(无输出)") + "</div>";
   body.appendChild(det);
   const n = body.querySelectorAll("details.tool-details").length;
-  AppState.currentTurnEl.querySelector(".turn-count").textContent = n + " 步";
-  scrollFeed(nearBottom());
+  tab.turnEl.querySelector(".turn-count").textContent = n + " 步";
+  scrollFeedEl(tab.feedEl, nearBottom(tab.feedEl));
 }
-
-/* ═══════════ 统计累积 ═══════════ */
-function trackTool(ev) {
-  Stats.tools[ev.tool] = (Stats.tools[ev.tool] || 0) + 1;
+function trackTool(tab, ev) {
+  tab.stats.tools[ev.tool] = (tab.stats.tools[ev.tool] || 0) + 1;
   const t = ev.target || "";
   if (/[\\/]/.test(t) || t.includes(".")) {
     if (["write_file", "edit_file", "append_file"].includes(ev.tool)) {
-      if (!Stats.writes.includes(t)) Stats.writes.push(t);
+      if (!tab.stats.writes.includes(t)) tab.stats.writes.push(t);
     } else if (ev.tool === "read_file") {
-      if (!Stats.reads.includes(t)) Stats.reads.push(t);
+      if (!tab.stats.reads.includes(t)) tab.stats.reads.push(t);
     }
   }
 }
-function renderActivity() {
-  const body = document.getElementById("activityBody");
-  const toolEntries = Object.entries(Stats.tools).sort((a, b) => b[1] - a[1]);
-  const maxCnt = toolEntries.length ? toolEntries[0][1] : 1;
-  let html = "";
-  // 运行统计
-  html += "<div class='act-section'><div class='as-title'>运行统计</div><div class='act-stats'>" +
-    "<div class='act-stat'><div class='val'>" + Stats.tokens + "</div><div class='lbl'>tokens</div></div>" +
-    "<div class='act-stat'><div class='val'>" + Stats.steps + "</div><div class='lbl'>steps</div></div>" +
-    "<div class='act-stat'><div class='val'>" + toolEntries.reduce((s, e) => s + e[1], 0) + "</div><div class='lbl'>工具调用</div></div>" +
-    "<div class='act-stat'><div class='val'>" + Stats.writes.length + "</div><div class='lbl'>文件改动</div></div>" +
-    "</div></div>";
-  // 工具分布
-  if (toolEntries.length) {
-    html += "<div class='act-section'><div class='as-title'>工具使用</div>";
-    toolEntries.slice(0, 8).forEach(([name, cnt]) => {
-      html += "<div class='tool-bar-row'><span class='tname'>" + escHtml(name) + "</span>" +
-        "<div class='tbar'><i style='width:" + Math.round(cnt / maxCnt * 100) + "%'></i></div>" +
-        "<span class='tcnt'>" + cnt + "</span></div>";
-    });
-    html += "</div>";
-  }
-  // 文件改动
-  if (Stats.writes.length || Stats.reads.length) {
-    html += "<div class='act-section'><div class='as-title'>文件活动</div>";
-    Stats.writes.forEach(f => { html += "<div class='act-file'><span class='w'>✎</span>" + escHtml(f) + "</div>"; });
-    Stats.reads.slice(-8).forEach(f => { html += "<div class='act-file'><span class='r'>👁</span>" + escHtml(f) + "</div>"; });
-    html += "</div>";
-  }
-  // 会话目标
-  html += "<div class='act-section'><div class='as-title'>会话目标</div>" +
-    (AppState.sessionGoal
-      ? "<div class='act-goal'>🎯 " + escHtml(AppState.sessionGoal) + "</div>"
-      : "<div class='act-empty'>未设置 — 输入 /goal 设置目标</div>") +
-    "</div>";
-  // 配置摘要
-  html += "<div class='act-section'><div class='as-title'>当前配置</div>" +
-    "<div class='act-goal'>🤖 " + escHtml(document.getElementById("model").value) +
-    "<br>⚙ " + escHtml(document.getElementById("mode").value) +
-    "<br>📂 " + escHtml(document.getElementById("ws").textContent.replace(/^📂\s*/, "")) + "</div></div>";
-  body.innerHTML = html || '<div class="act-empty">暂无数据 — 运行一个任务后查看</div>';
-}
-function toggleActivity() {
-  const p = document.getElementById("activityPanel");
-  const b = document.getElementById("activityBtn");
-  const show = !p.classList.contains("show");
-  p.classList.toggle("show", show);
-  b.classList.toggle("active", show);
-  if (show) renderActivity();
-}
 
-/* ═══════════ SSE 事件渲染 ═══════════ */
-function onEvent(ev) {
+/* ═══════════ SSE 事件渲染（按 tab 路由） ═══════════ */
+function onEvent(ev, tab) {
   if (ev.kind === "text") {
     const t = (ev.text || "").trim();
     if (!t) return;
-    if (!AppState.currentTurnEl) beginTurn(ev.step || 1);
-    const body = AppState.currentTurnEl.querySelector(".turn-body");
+    if (!tab.turnEl) beginTurn(tab, ev.step || 1);
+    const body = tab.turnEl.querySelector(".turn-body");
     const div = document.createElement("div");
     div.className = "think";
     div.textContent = "│ " + (t.length > 600 ? t.slice(0, 600) + "…" : t);
     body.appendChild(div);
-    scrollFeed(nearBottom());
+    scrollFeedEl(tab.feedEl, nearBottom(tab.feedEl));
   } else if (ev.kind === "tool") {
-    appendToolToTurn(ev);
-    trackTool(ev);
+    appendToolToTurn(tab, ev);
+    trackTool(tab, ev);
   } else if (ev.kind === "turn") {
-    beginTurn(ev.step);
-    Stats.tokens = ev.tokens || 0;
-    Stats.steps = ev.step;
-    document.getElementById("f-tokens").textContent = Stats.tokens;
-    document.getElementById("f-steps").textContent = Stats.steps;
+    beginTurn(tab, ev.step);
+    tab.stats.tokens = ev.tokens || 0;
+    tab.stats.steps = ev.step;
+    if (Tabs.active && Tabs.active.id === tab.id) {
+      document.getElementById("f-tokens").textContent = tab.stats.tokens;
+      document.getElementById("f-steps").textContent = tab.stats.steps;
+    }
   } else if (ev.kind === "answer") {
-    if (AppState.currentTurnEl) {
-      const body = AppState.currentTurnEl.querySelector(".turn-body");
+    if (tab.turnEl) {
+      const body = tab.turnEl.querySelector(".turn-body");
       const div = document.createElement("div");
       div.className = "turn-answer";
       div.appendChild(renderMarkdown(ev.answer));
       body.appendChild(div);
-      AppState.currentTurnEl.open = true;
+      tab.turnEl.open = true;
     } else {
       const div = document.createElement("div");
       div.className = "message answer";
       div.appendChild(renderMarkdown(ev.answer));
-      feed.appendChild(div);
+      tab.feedEl.appendChild(div);
     }
-    scrollFeed(true);
+    scrollFeedEl(tab.feedEl, true);
   } else if (ev.kind === "error") {
-    add("error", ev.error);
+    addTabMsg(tab, "error", ev.error);
   } else if (ev.kind === "status") {
-    add("turn", ev.message);
+    addTabMsg(tab, "turn", ev.message);
   } else if (ev.kind === "done") {
-    setRunning(false);
+    setRunning(tab, false);
     loadSessions();
-    if (document.getElementById("activityPanel").classList.contains("show")) renderActivity();
   }
 }
-async function listenEvents() {
-  if (AppState.es) AppState.es.close();
-  AppState.es = new EventSource("/api/events");
-  AppState.es.onmessage = (e) => onEvent(JSON.parse(e.data));
-  AppState.es.onerror = () => { console.log("SSE 连接断开，等待重连..."); };
+
+function listenEvents(tab) {
+  if (!tab.runId) return;
+  if (tab.es) tab.es.close();
+  tab.es = new EventSource("/api/events?run_id=" + encodeURIComponent(tab.runId));
+  tab.es.onmessage = (e) => onEvent(JSON.parse(e.data), tab);
+  tab.es.onerror = () => { console.log("SSE 断开，等待重连..."); };
 }
 
 /* ═══════════ 运行 / 停止 ═══════════ */
 async function submitTask(task) {
-  if (AppState.running || !task) return;
-  if (AppState.viewingHistory) closeHistory();
-  document.getElementById("welcome")?.remove();
-  const um = add("user", task);
-  um.appendChild(msgOps("↻ 重跑", () => submitTask(task)));
-  um.appendChild(msgOps("⧉ 复制", () => copyText(task)));
+  const tab = activeTab();
+  if (!tab || tab.running || !task) return;
+  if (tab.viewingHistory) closeHistory(tab);
+  const w = tab.feedEl.querySelector("#welcome");
+  if (w) w.remove();
+  const um = addTabMsg(tab, "user", task);
+  const ops = document.createElement("div");
+  ops.className = "msg-ops";
+  const rb = document.createElement("button");
+  rb.textContent = "↻ 重跑";
+  rb.onclick = () => submitTask(task);
+  const cb = document.createElement("button");
+  cb.textContent = "⧉ 复制";
+  cb.onclick = () => copyText(task);
+  ops.appendChild(rb);
+  ops.appendChild(cb);
+  um.appendChild(ops);
   inputEl.value = "";
   inputEl.style.height = "auto";
-  setRunning(true);
+  setRunning(tab, true);
+  tab.title = task.length > 18 ? task.slice(0, 18) + "…" : task;
+  tab.btn.querySelector(".t-title").textContent = tab.title;
   const mode = document.getElementById("mode").value;
   const model = document.getElementById("model").value;
   const resp = await fetch("/api/run", {
@@ -727,16 +738,26 @@ async function submitTask(task) {
   });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: "未知错误" }));
-    add("error", err.detail || "启动失败");
-    setRunning(false);
+    addTabMsg(tab, "error", err.detail || "启动失败");
+    setRunning(tab, false);
     return;
   }
-  listenEvents();
+  const data = await resp.json();
+  tab.runId = data.run_id;
+  listenEvents(tab);
 }
+
 async function abort() {
-  await fetch("/api/abort", { method: "POST" });
-  add("turn", "■ 停止请求已发送…");
+  const tab = activeTab();
+  if (!tab) return;
+  await fetch("/api/abort", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ run_id: tab.runId || "" })
+  });
+  addTabMsg(tab, "turn", "■ 停止请求已发送…");
 }
+
 function handleSubmit() {
   const task = inputEl.value.trim();
   if (task) {
@@ -745,25 +766,27 @@ function handleSubmit() {
   }
 }
 
-/* ═══════════ 历史会话 ═══════════ */
+/* ═══════════ 历史会话（作用于当前 tab） ═══════════ */
 async function openSession(file) {
+  const tab = activeTab();
+  if (!tab) return;
   const resp = await fetch("/api/session?file=" + encodeURIComponent(file));
   if (!resp.ok) {
     const e = await resp.json().catch(() => ({}));
-    add("error", e.detail || "加载会话失败");
+    addTabMsg(tab, "error", e.detail || "加载会话失败");
     return;
   }
   const data = await resp.json();
-  AppState.viewingHistory = true;
-  AppState.currentSessionFile = file;
-  AppState.sessionData = data;
+  tab.viewingHistory = true;
+  tab.sessionFile = file;
+  tab.sessionData = data;
   document.getElementById("historyBar").style.display = "flex";
   document.getElementById("histTitle").textContent = "📜 " + (data.task || "历史会话");
   document.querySelectorAll(".session-item").forEach(el => el.classList.toggle("active", el.dataset.file === file));
-  feed.innerHTML = "";
+  tab.feedEl.innerHTML = "";
   const turns = data.turns || [];
   if (!turns.length) {
-    feed.innerHTML = '<div style="color:var(--faint);font-size:12px;padding:20px;text-align:center;">该会话暂无消息记录</div>';
+    tab.feedEl.innerHTML = '<div style="color:var(--faint);font-size:12px;padding:20px;text-align:center;">该会话暂无消息记录</div>';
     return;
   }
   turns.forEach((t, i) => {
@@ -821,22 +844,25 @@ async function openSession(file) {
       body.appendChild(a);
     }
     det.appendChild(body);
-    feed.appendChild(det);
+    tab.feedEl.appendChild(det);
   });
-  scrollFeed(true);
+  scrollFeedEl(tab.feedEl, true);
 }
-function closeHistory() {
-  AppState.viewingHistory = false;
-  AppState.currentSessionFile = null;
-  AppState.sessionData = null;
+
+function closeHistory(tab) {
+  tab.viewingHistory = false;
+  tab.sessionFile = null;
+  tab.sessionData = null;
   document.getElementById("historyBar").style.display = "none";
   document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
-  feed.innerHTML = "";
-  renderWelcome();
-  add("turn", "已返回实时视图——运行新任务开始新的对话");
+  tab.feedEl.innerHTML = "";
+  renderWelcome(tab);
+  addTabMsg(tab, "turn", "已返回实时视图——运行新任务开始新的对话");
 }
+
 function downloadSession() {
-  const d = AppState.sessionData;
+  const tab = activeTab();
+  const d = tab ? tab.sessionData : null;
   if (!d) return;
   const lines = ["Coder-Agent 会话导出", "任务: " + (d.task || ""), "=".repeat(40), ""];
   (d.turns || []).forEach((t, i) => {
@@ -858,7 +884,7 @@ function downloadSession() {
   URL.revokeObjectURL(a.href);
 }
 
-/* ═══════════ 会话列表（按项目/工作区分组）═══════════ */
+/* ═══════════ 会话列表（按项目分组） ═══════════ */
 function updateGoalBadge() {
   const b = document.getElementById("goalBadge");
   if (AppState.sessionGoal) {
@@ -873,7 +899,8 @@ document.getElementById("goalBadge").addEventListener("click", () => {
   AppState.sessionGoal = "";
   localStorage.removeItem('coder_goal');
   updateGoalBadge();
-  add("turn", "🎯 会话目标已清除");
+  const tab = activeTab();
+  if (tab) addTabMsg(tab, "turn", "🎯 会话目标已清除");
 });
 function sessionProject(ws) {
   if (!ws) return "未分类";
@@ -891,13 +918,11 @@ async function loadSessions() {
     box.innerHTML = '<div style="font-size:11px;color:var(--faint);padding:8px;">暂无会话</div>';
     return;
   }
-  // 按项目分组
   const groups = {};
   sessions.forEach(s => {
     const proj = sessionProject(s.workspace);
     (groups[proj] = groups[proj] || []).push(s);
   });
-  // 当前工作区优先置顶
   let curWs = "";
   try { curWs = (await (await fetch("/api/workspace")).json()).workspace; } catch (e) {}
   const curProj = sessionProject(curWs);
@@ -909,14 +934,14 @@ async function loadSessions() {
   projOrder.forEach(proj => {
     const gh = document.createElement("div");
     gh.style.cssText = "font-size:11px;color:var(--accent);margin:10px 2px 4px;font-weight:600;";
-    gh.textContent = "📁 " + proj + (proj === curProj ? "（当前）" : "") +
-      " · " + groups[proj].length + " 个会话";
+    gh.textContent = "📁 " + proj + (proj === curProj ? "（当前）" : "") + " · " + groups[proj].length + " 个会话";
     box.appendChild(gh);
     groups[proj].forEach(s => {
       const div = document.createElement("div");
       div.className = "session-item";
       div.dataset.file = s.file;
-      if (s.file === AppState.currentSessionFile) div.classList.add("active");
+      const tab = activeTab();
+      if (tab && s.file === tab.sessionFile) div.classList.add("active");
       const time = s.file.split(/[\\/]/).pop().replace(/\.jsonl$/, "").replace(/^session_/, "");
       div.innerHTML = escHtml(s.task || "无标题") +
         '<div class="session-meta"><span>🗂 ' + escHtml(time) + '</span></div>' +
@@ -926,7 +951,8 @@ async function loadSessions() {
         if (!confirm("删除该会话？")) return;
         const r = await fetch("/api/session?file=" + encodeURIComponent(s.file), { method: "DELETE" });
         if (r.ok) {
-          if (AppState.currentSessionFile === s.file) closeHistory();
+          const t = activeTab();
+          if (t && t.sessionFile === s.file) closeHistory(t);
           loadSessions();
         }
       };
@@ -936,24 +962,19 @@ async function loadSessions() {
   });
 }
 
-/* ═══════════ 文件面板 ═══════════ */
-function showTab(tab) {
-  // 两个 pane 均为 flex-column；只切换显示/隐藏，避免布局变形
-  document.getElementById("pane-sessions").style.display = tab === "sessions" ? "flex" : "none";
-  document.getElementById("pane-files").style.display = tab === "files" ? "flex" : "none";
-  document.getElementById("tab-sessions").classList.toggle("active", tab === "sessions");
-  document.getElementById("tab-files").classList.toggle("active", tab === "files");
-  if (tab === "files" && !document.getElementById("filetree").dataset.loaded) {
+/* ═══════════ 文件面板 / 树 ═══════════ */
+function showTab(tabName) {
+  document.getElementById("pane-sessions").style.display = tabName === "sessions" ? "flex" : "none";
+  document.getElementById("pane-files").style.display = tabName === "files" ? "flex" : "none";
+  document.getElementById("tab-sessions").classList.toggle("active", tabName === "sessions");
+  document.getElementById("tab-files").classList.toggle("active", tabName === "files");
+  if (tabName === "files" && !document.getElementById("filetree").dataset.loaded) {
     loadFiles();
   }
 }
-
-/* 文件树：懒加载展开（目录 ▶ 点击展开/折叠子层） */
-let treePathCache = new Set();
 async function loadFiles(dir, container, depth) {
   const rootContainer = container || document.getElementById("filetree");
   if (!container) {
-    treePathCache.clear();
     rootContainer.dataset.loaded = "1";
     rootContainer.innerHTML = '<div style="color:var(--faint);font-size:11px;padding:8px;">加载中…</div>';
   }
@@ -1024,7 +1045,7 @@ async function loadFiles(dir, container, depth) {
 }
 async function viewFile(path) {
   const r = await fetch("/api/file?path=" + encodeURIComponent(path));
-  if (!r.ok) { const e = await r.json().catch(() => ({})); add("error", e.detail || "无法查看"); return; }
+  if (!r.ok) { const e = await r.json().catch(() => ({})); const t = activeTab(); if (t) addTabMsg(t, "error", e.detail || "无法查看"); return; }
   const d = await r.json();
   document.getElementById("fileTitle").textContent = d.path + "  (" + d.size + " 字符)";
   document.getElementById("fileBody").textContent = d.content + (d.truncated ? "\n…[已截断]" : "");
@@ -1035,7 +1056,6 @@ function closeFileViewer() { document.getElementById("fileModal").classList.remo
 /* ═══════════ 打开文件夹 ═══════════ */
 let browseCurrent = "";
 async function openFolderDialog() {
-  // 优先系统原生文件夹选择对话框（后端 PowerShell），失败/取消回退自绘浏览器
   try {
     const resp = await fetch("/api/fs/pick", { method: "POST" });
     const data = await resp.json();
@@ -1061,9 +1081,11 @@ async function applyWorkspace(path) {
     closeFolderDialog();
     loadSessions();
     loadFiles();
-    add("turn", "📂 工作区已切换: " + data.workspace);
+    const t = activeTab();
+    if (t) addTabMsg(t, "turn", "📂 工作区已切换: " + data.workspace);
   } else {
-    add("error", data.detail || "切换失败");
+    const t = activeTab();
+    if (t) addTabMsg(t, "error", data.detail || "切换失败");
   }
 }
 function closeFolderDialog() { document.getElementById("folderModal").classList.remove("show"); }
@@ -1125,7 +1147,6 @@ function renderModelDropdown() {
     };
     dropdown.appendChild(div);
   });
-  // 自定义模型入口：进入编辑模式
   const custom = document.createElement("div");
   custom.className = "model-item";
   custom.style.cssText = "border-top:1px solid var(--border);color:var(--accent);";
@@ -1148,7 +1169,6 @@ async function saveModelOnly(m) {
   }).catch(() => {});
 }
 const modelInput = document.getElementById("model");
-// header 模型：失焦/回车保存，并恢复只读（下拉选择模式）
 modelInput.addEventListener("change", () => {
   const v = modelInput.value.trim();
   if (v) saveModelOnly(v);
@@ -1183,7 +1203,6 @@ async function openConfigModal() {
   const cfgResp = await fetch("/api/config");
   const cfg = await cfgResp.json();
   if (!AppState.models.length) await loadModels();
-  // 填充 datalist 选项
   const dl = document.getElementById("cfgModelList");
   dl.innerHTML = "";
   AppState.models.forEach(m => {
@@ -1216,14 +1235,16 @@ async function saveConfig() {
   if (resp.ok) {
     if (model) document.getElementById("model").value = model;
     closeConfigModal();
-    add("turn", "⚙ 配置已保存: 模型=" + (data.model || model || "不变") +
+    const t = activeTab();
+    if (t) addTabMsg(t, "turn", "⚙ 配置已保存: 模型=" + (data.model || model || "不变") +
       (baseUrl ? " | Base URL=" + baseUrl : "") + (apiKey ? " | API Key 已更新" : ""));
   } else {
-    add("error", data.detail || "保存配置失败");
+    const t = activeTab();
+    if (t) addTabMsg(t, "error", data.detail || "保存配置失败");
   }
 }
 
-/* ═══════════ 斜杠命令面板 ═══════════ */
+/* ═══════════ 命令面板 ═══════════ */
 async function loadCommands() {
   try {
     const resp = await fetch("/api/commands");
@@ -1239,6 +1260,9 @@ async function loadCommands() {
       { name: "/goal", desc: "设置目标", hasArgs: true },
       { name: "/sessions", desc: "列出会话", hasArgs: false },
       { name: "/resume", desc: "恢复会话", hasArgs: true },
+      { name: "/compact", desc: "压缩上下文", hasArgs: false },
+      { name: "/history", desc: "最近消息", hasArgs: false },
+      { name: "/trace", desc: "工具追踪", hasArgs: false },
       { name: "/clear", desc: "清空对话", hasArgs: false },
     ];
   }
@@ -1253,30 +1277,18 @@ function hideParamHint() {
   document.getElementById("paramHint").style.display = "none";
 }
 function cmdStatus(c) {
-  // 每个命令在面板中显示当前动态状态（与框架状态对齐）
+  const tab = activeTab();
   switch (c.name) {
-    case "/model":
-      return document.getElementById("model").value || "?";
-    case "/mode":
-      return document.getElementById("mode").value;
-    case "/goal":
-      return AppState.sessionGoal
-        ? "🎯 " + (AppState.sessionGoal.length > 16 ? AppState.sessionGoal.slice(0, 16) + "…" : AppState.sessionGoal)
-        : "未设置";
-    case "/sessions":
-      return AppState.sessionCount ? AppState.sessionCount + " 个会话" : "无会话";
-    case "/resume":
-      return AppState.sessionCount ? "可恢复" : "无会话";
-    case "/status":
-      return AppState.running ? "● 运行中" : "○ 空闲";
-    case "/compact":
-      return Stats.steps ? "已记录 " + Stats.steps + " 步" : "—";
-    case "/history":
-      return Stats.steps ? "最近 10 条" : "—";
-    case "/trace":
-      return Stats.steps ? "可查看" : "—";
-    default:
-      return "";
+    case "/model": return document.getElementById("model").value || "?";
+    case "/mode": return document.getElementById("mode").value;
+    case "/goal": return AppState.sessionGoal ? "🎯 已设置" : "未设置";
+    case "/sessions": return AppState.sessionCount ? AppState.sessionCount + " 个会话" : "无会话";
+    case "/resume": return AppState.sessionCount ? "可恢复" : "无会话";
+    case "/status": return (tab && tab.running) ? "● 运行中" : "○ 空闲";
+    case "/compact": return (tab && tab.stats.steps) ? "已记录 " + tab.stats.steps + " 步" : "—";
+    case "/history": return (tab && tab.stats.steps) ? "最近 10 条" : "—";
+    case "/trace": return (tab && tab.stats.steps) ? "可查看" : "—";
+    default: return "";
   }
 }
 function renderPalette(items) {
@@ -1329,7 +1341,8 @@ function currentCommand() {
 }
 function updatePalette() {
   const v = inputEl.value;
-  if (AppState.running || !v.startsWith("/")) { hidePalette(); hideParamHint(); return; }
+  const tab = activeTab();
+  if ((tab && tab.running) || !v.startsWith("/")) { hidePalette(); hideParamHint(); return; }
   const token = v.split(/\s+/)[0];
   renderPalette(AppState.commands.filter(c => c.name.startsWith(token)));
   const cmd = AppState.commands.find(c => c.name === token);
@@ -1350,7 +1363,8 @@ inputEl.addEventListener("keydown", (e) => {
   const paletteOpen = paletteEl.style.display === "block";
   if (e.key === "Escape") {
     if (paletteOpen) { hidePalette(); hideParamHint(); e.preventDefault(); return; }
-    if (AppState.running) { abort(); e.preventDefault(); }
+    const tab = activeTab();
+    if (tab && tab.running) { abort(); e.preventDefault(); }
     return;
   }
   if (paletteOpen && e.key === "ArrowDown") { movePalette(1); e.preventDefault(); return; }
@@ -1396,22 +1410,38 @@ inputEl.addEventListener("keydown", (e) => {
 
 /* ═══════════ 全局快捷键 ═══════════ */
 document.addEventListener("keydown", (e) => {
-  if (!(e.ctrlKey || e.metaKey)) return;
-  const k = e.key.toLowerCase();
-  if (k === "enter") { e.preventDefault(); handleSubmit(); }
-  else if (k === "k") { e.preventDefault(); feed.innerHTML = ""; AppState.currentTurnEl = null; renderWelcome(); }
-  else if (k === "l") { e.preventDefault(); toggleTheme(); }
-  else if (k === "o") { e.preventDefault(); openFolderDialog(); }
-  else if (k === ",") { e.preventDefault(); openConfigModal(); }
-  else if (k === "b") { e.preventDefault(); toggleActivity(); }
+  if (e.ctrlKey || e.metaKey) {
+    const k = e.key.toLowerCase();
+    if (k === "enter") { e.preventDefault(); handleSubmit(); }
+    else if (k === "k") { e.preventDefault(); const t = activeTab(); if (t) { t.feedEl.innerHTML = ""; t.turnEl = null; renderWelcome(t); } }
+    else if (k === "l") { e.preventDefault(); toggleTheme(); }
+    else if (k === "o") { e.preventDefault(); openFolderDialog(); }
+    else if (k === ",") { e.preventDefault(); openConfigModal(); }
+    else if (k === "b") { e.preventDefault(); toggleActivity(); }
+    else if (k === "t") { e.preventDefault(); createTab(); }
+    else if (k === "w") { e.preventDefault(); const t = activeTab(); if (t) closeTab(t.id); }
+    else if (k === "tab") {
+      e.preventDefault();
+      if (Tabs.list.length > 1) {
+        const idx = Tabs.list.findIndex(t => t.id === Tabs.active.id);
+        switchTab(Tabs.list[(idx + 1) % Tabs.list.length].id);
+      }
+    }
+    return;
+  }
+  if (e.key === "Escape") {
+    const t = activeTab();
+    if (t && t.viewingHistory) closeHistory(t);
+  }
 });
 
 /* ═══════════ 命令执行 ═══════════ */
 async function execLine(line) {
+  const tab = activeTab();
   const parts = line.split(/\s+/);
   const cmd = parts[0], arg = parts.slice(1).join(" ");
   if (cmd === "/help") {
-    const card = add("answer", "");
+    const card = addTabMsg(tab, "answer", "");
     const groups = [
       ["📖 基本信息", ["/help", "/status", "/tools"]],
       ["🚀 运行控制", ["/model", "/mode", "/goal"]],
@@ -1432,12 +1462,14 @@ async function execLine(line) {
     card.style.whiteSpace = "pre-wrap";
   } else if (cmd === "/status") {
     const s = await (await fetch("/api/status")).json();
-    add("answer", "运行中: " + s.running + " | 模型: " + s.model +
+    const runsInfo = (s.runs || []).map(r => "  " + r.run_id + " " + (r.running ? "● 运行中" : "○ 结束")).join("\n");
+    addTabMsg(tab, "answer", "运行中: " + s.running + " | 模型: " + s.model +
       " | 模式: " + s.mode + "\n工作区: " + s.workspace +
-      (AppState.sessionGoal ? "\n会话目标: " + AppState.sessionGoal : ""));
+      (AppState.sessionGoal ? "\n会话目标: " + AppState.sessionGoal : "") +
+      (runsInfo ? "\n并行会话:\n" + runsInfo : ""));
   } else if (cmd === "/tools") {
     const d = await (await fetch("/api/tools")).json();
-    const card = add("answer", "");
+    const card = addTabMsg(tab, "answer", "");
     card.innerHTML = "<b>可用工具 (" + d.tools.length + ")</b><br>" +
       d.tools.map(t => "  " + t.name + " — " + t.description.substring(0, 60) + "...").join("<br>");
     card.style.whiteSpace = "pre-wrap";
@@ -1447,69 +1479,70 @@ async function execLine(line) {
       if (AppState.models.length) {
         const cur = document.getElementById("model").value;
         if (!AppState.models.includes(cur)) document.getElementById("model").value = AppState.models[0];
-        add("answer", "在线模型:\n" + AppState.models.map(m =>
+        addTabMsg(tab, "answer", "在线模型:\n" + AppState.models.map(m =>
           (m === document.getElementById("model").value ? "  ← " : "  ") + m).join("\n"));
-      } else add("error", "在线模型列表不可用");
+      } else addTabMsg(tab, "error", "在线模型列表不可用");
     } else {
       document.getElementById("model").value = arg;
       saveModelOnly(arg);
-      add("answer", "模型已切换: " + arg + "（下次运行生效）");
+      addTabMsg(tab, "answer", "模型已切换: " + arg + "（下次运行生效）");
     }
   } else if (cmd === "/mode") {
     if (["full", "goal", "plan", "dry-run"].includes(arg)) {
       document.getElementById("mode").value = arg;
-      add("answer", "模式已切换: " + arg);
-    } else add("answer", "当前模式: " + document.getElementById("mode").value +
+      addTabMsg(tab, "answer", "模式已切换: " + arg);
+    } else addTabMsg(tab, "answer", "当前模式: " + document.getElementById("mode").value +
       "（用法: /mode full|goal|plan|dry-run）");
   } else if (cmd === "/goal") {
     if (arg === "clear") {
       AppState.sessionGoal = "";
       localStorage.removeItem('coder_goal');
       updateGoalBadge();
-      add("answer", "会话目标已清除");
+      addTabMsg(tab, "answer", "会话目标已清除");
     } else if (arg) {
       AppState.sessionGoal = arg;
       localStorage.setItem('coder_goal', arg);
       updateGoalBadge();
-      add("answer", "会话目标已设置: " + arg + "\n将随每次运行注入系统提示（Goal 字段）");
-    } else add("answer", AppState.sessionGoal ? "当前会话目标: " + AppState.sessionGoal : "未设置（用法: /goal <text>）");
+      addTabMsg(tab, "answer", "会话目标已设置: " + arg + "\n将随每次运行注入系统提示（Goal 字段）");
+    } else addTabMsg(tab, "answer", AppState.sessionGoal ? "当前会话目标: " + AppState.sessionGoal : "未设置（用法: /goal <text>）");
   } else if (cmd === "/sessions") {
     const d = await (await fetch("/api/sessions")).json();
-    const card = add("answer", "");
+    const card = addTabMsg(tab, "answer", "");
     card.innerHTML = d.sessions.length
       ? "<b>会话列表（点击侧边栏查看详情）:</b><br>" + d.sessions.map((s, i) => (i + 1) + ". " + (s.task || "无标题")).join("<br>")
       : "没有会话——先运行一次任务";
     card.style.whiteSpace = "pre-wrap";
   } else if (cmd === "/resume") {
-    if (AppState.running) {
-      add("error", "当前有任务在运行，请先停止");
+    if (tab.running) {
+      addTabMsg(tab, "error", "当前会话有任务在运行，请先停止");
       return;
     }
-    setRunning(true);
+    setRunning(tab, true);
     const resp = await fetch("/api/resume", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ task: arg || "继续之前的任务", goal: AppState.sessionGoal, resume: "" })
     });
     if (!resp.ok) {
-      add("error", (await resp.json().catch(() => ({}))).detail || "恢复失败");
-      setRunning(false);
+      addTabMsg(tab, "error", (await resp.json().catch(() => ({}))).detail || "恢复失败");
+      setRunning(tab, false);
       return;
     }
-    listenEvents();
+    const data = await resp.json();
+    tab.runId = data.run_id;
+    listenEvents(tab);
   } else if (cmd === "/compact") {
     const resp = await fetch("/api/compact", { method: "POST" });
     const d = await resp.json().catch(() => ({}));
     if (resp.ok) {
-      add("answer", "✅ 上下文已压缩: " + d.before + " → " + d.after + " 条消息" +
-        "\n（下次 /resume 恢复时使用压缩后的历史）");
+      addTabMsg(tab, "answer", "✅ 上下文已压缩: " + d.before + " → " + d.after + " 条消息");
     } else {
-      add("error", d.detail || "压缩失败");
+      addTabMsg(tab, "error", d.detail || "压缩失败");
     }
   } else if (cmd === "/history") {
     const d = await (await fetch("/api/context")).json();
     const msgs = d.messages || [];
-    const card = add("answer", "");
+    const card = addTabMsg(tab, "answer", "");
     if (d.running) card.innerHTML = "<b>（运行中，显示最近消息）</b><br>";
     card.innerHTML += msgs.length
       ? msgs.map(m => "<span style='color:" +
@@ -1520,27 +1553,72 @@ async function execLine(line) {
   } else if (cmd === "/trace") {
     const d = await (await fetch("/api/trace")).json();
     const entries = d.entries || [];
-    const card = add("answer", "");
+    const card = addTabMsg(tab, "answer", "");
     card.innerHTML = entries.length
       ? "<b>最近一次运行的工具追踪 (" + entries.length + " 条):</b><br>" +
-        entries.map(e => {
-          const t = e.tool || e.name || "?";
-          return "  step " + (e.step || e.turn || "?") + "  " + escHtml(t);
-        }).join("<br>")
+        entries.map(e => "  step " + (e.step || e.turn || "?") + "  " + escHtml(e.tool || e.name || "?")).join("<br>")
       : "没有追踪数据——先运行一次任务";
     card.style.whiteSpace = "pre-wrap";
   } else if (cmd === "/clear") {
-    feed.innerHTML = "";
-    AppState.currentTurnEl = null;
-    renderWelcome();
+    tab.feedEl.innerHTML = "";
+    tab.turnEl = null;
+    renderWelcome(tab);
   } else {
-    add("error", "未知命令: " + cmd + "（/help 查看命令列表）");
+    addTabMsg(tab, "error", "未知命令: " + cmd + "（/help 查看命令列表）");
   }
+}
+
+/* ═══════════ 活动面板 ═══════════ */
+function renderActivity() {
+  const body = document.getElementById("activityBody");
+  const tab = activeTab();
+  const st = tab ? tab.stats : { tokens: 0, steps: 0, tools: {}, writes: [], reads: [] };
+  const toolEntries = Object.entries(st.tools).sort((a, b) => b[1] - a[1]);
+  const maxCnt = toolEntries.length ? toolEntries[0][1] : 1;
+  let html = "";
+  html += "<div class='act-section'><div class='as-title'>运行统计</div><div class='act-stats'>" +
+    "<div class='act-stat'><div class='val'>" + st.tokens + "</div><div class='lbl'>tokens</div></div>" +
+    "<div class='act-stat'><div class='val'>" + st.steps + "</div><div class='lbl'>steps</div></div>" +
+    "<div class='act-stat'><div class='val'>" + toolEntries.reduce((s, e) => s + e[1], 0) + "</div><div class='lbl'>工具调用</div></div>" +
+    "<div class='act-stat'><div class='val'>" + st.writes.length + "</div><div class='lbl'>文件改动</div></div>" +
+    "</div></div>";
+  if (toolEntries.length) {
+    html += "<div class='act-section'><div class='as-title'>工具使用</div>";
+    toolEntries.slice(0, 8).forEach(([name, cnt]) => {
+      html += "<div class='tool-bar-row'><span class='tname'>" + escHtml(name) + "</span>" +
+        "<div class='tbar'><i style='width:" + Math.round(cnt / maxCnt * 100) + "%'></i></div>" +
+        "<span class='tcnt'>" + cnt + "</span></div>";
+    });
+    html += "</div>";
+  }
+  if (st.writes.length || st.reads.length) {
+    html += "<div class='act-section'><div class='as-title'>文件活动</div>";
+    st.writes.forEach(f => { html += "<div class='act-file'><span class='w'>✎</span>" + escHtml(f) + "</div>"; });
+    st.reads.slice(-8).forEach(f => { html += "<div class='act-file'><span class='r'>👁</span>" + escHtml(f) + "</div>"; });
+    html += "</div>";
+  }
+  html += "<div class='act-section'><div class='as-title'>会话目标</div>" +
+    (AppState.sessionGoal
+      ? "<div class='act-goal'>🎯 " + escHtml(AppState.sessionGoal) + "</div>"
+      : "<div class='act-empty'>未设置 — 输入 /goal 设置目标</div>") +
+    "</div>";
+  html += "<div class='act-section'><div class='as-title'>当前配置</div>" +
+    "<div class='act-goal'>🤖 " + escHtml(document.getElementById("model").value) +
+    "<br>⚙ " + escHtml(document.getElementById("mode").value) +
+    "<br>📂 " + escHtml(document.getElementById("ws").textContent.replace(/^📂\s*/, "")) + "</div></div>";
+  body.innerHTML = html || '<div class="act-empty">暂无数据 — 运行一个任务后查看</div>';
+}
+function toggleActivity() {
+  const p = document.getElementById("activityPanel");
+  const b = document.getElementById("activityBtn");
+  const show = !p.classList.contains("show");
+  p.classList.toggle("show", show);
+  b.classList.toggle("active", show);
+  if (show) renderActivity();
 }
 
 /* ═══════════ 初始化 ═══════════ */
 async function init() {
-  // 主题
   const saved = localStorage.getItem('coder_theme');
   applyTheme(saved || (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"));
   await Promise.all([
@@ -1554,7 +1632,7 @@ async function init() {
     document.getElementById("model").value = cfg.model || document.getElementById("model").value;
   } catch (e) {}
   updateGoalBadge();
-  renderWelcome();
+  createTab();
 }
 init();
 </script>

@@ -47,11 +47,11 @@ def _factory(tmp_path: Path, llm: ScriptedLLM):
     return factory
 
 
-def _wait_answer(mgr: RunManager, timeout: float = 10.0) -> dict:
+def _wait_answer(mgr: RunManager, timeout: float = 10.0, run_id: str | None = None) -> dict:
     deadline = time.time() + timeout
     events = []
     while time.time() < deadline:
-        evs = mgr.drain_events()
+        evs = mgr.drain_events(run_id=run_id)
         events.extend(evs)
         if any(e["kind"] == "done" for e in evs):
             break
@@ -102,18 +102,24 @@ class TestRunManager:
         time.sleep(0.5)
         assert not mgr.running
 
-    def test_single_run_enforced(self, tmp_path: Path):
-        llm = ScriptedLLM(answers=["x"])
-        factory = _factory(tmp_path, llm)
-        mgr = RunManager(tmp_path, agent_factory=factory)
-        # 占住运行状态：用一个慢工厂+线程模拟
-        import threading
-        holder = threading.Event()
-        mgr._thread = threading.Thread(target=holder.wait, daemon=True)
-        mgr._thread.start()
-        r = mgr.start("another")
-        assert not r["ok"]
-        holder.set()
+    def test_parallel_runs_independent(self, tmp_path: Path):
+        """并行会话：两个任务可同时启动，事件流按 run_id 互相独立。"""
+        llm = ScriptedLLM(answers=["X"])
+        mgr = RunManager(tmp_path, agent_factory=_factory(tmp_path, llm))
+        r1 = mgr.start("task A")
+        assert r1["ok"]
+        # 第二个任务在第一个运行中启动：不拒绝，独立 run_id
+        r2 = mgr.start("task B")
+        assert r2["ok"]
+        assert r1["run_id"] != r2["run_id"]
+        out1 = _wait_answer(mgr, run_id=r1["run_id"])
+        out2 = _wait_answer(mgr, run_id=r2["run_id"])
+        # 两个事件流各自独立到达 done
+        assert "done" in out1["kinds"]
+        assert "done" in out2["kinds"]
+        assert "answer" in out1["kinds"]
+        assert "answer" in out2["kinds"]
+        assert not mgr.running
 
 
 class TestWebResume:

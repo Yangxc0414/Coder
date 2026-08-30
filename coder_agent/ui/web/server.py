@@ -67,17 +67,21 @@ def api_run(req: RunRequest):
 
 
 @app.post("/api/abort")
-def api_abort():
-    get_manager().abort()
+def api_abort(req: dict | None = None):
+    """停止指定 run_id 的运行；缺省停止全部。"""
+    run_id = (req or {}).get("run_id") if req else None
+    if not run_id:
+        run_id = None
+    get_manager().abort(run_id=run_id)
     return {"ok": True}
 
 
 @app.get("/api/events")
-async def api_events():
+async def api_events(run_id: str | None = None):
     async def gen():
         loop = asyncio.get_event_loop()
-        # 在线程池里消费阻塞队列，逐条转 SSE
-        for event in get_manager().stream_events():
+        # 在线程池里消费指定会话的阻塞队列，逐条转 SSE
+        for event in get_manager().stream_events(run_id=run_id):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             await asyncio.sleep(0)
 
@@ -281,7 +285,7 @@ def api_trace():
 def api_status():
     m = get_manager()
     return {"running": m.running, "model": m.model, "mode": m.mode,
-            "workspace": str(m.workspace)}
+            "workspace": str(m.workspace), "runs": m.runs_status()}
 
 
 # ── API 配置（模型 / Base URL / Key）──────────────────────────────────
