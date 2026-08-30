@@ -27,6 +27,14 @@
   form input[type=text] { flex: 1; }
   button.primary { background: #1e88e5; color: white; border: none; border-radius: 6px; padding: 8px 18px; cursor: pointer; }
   button.stop { background: #c62828; color: white; border: none; border-radius: 6px; padding: 8px 14px; cursor: pointer; display: none; }
+  #palette { display:none; position:absolute; bottom:64px; left:16px; right:16px;
+    background:#1b1e24; border:1px solid #2a2e36; border-radius:10px;
+    max-height:280px; overflow-y:auto; z-index:40; box-shadow:0 -4px 20px rgba(0,0,0,.4); }
+  #palette .item { padding:8px 12px; cursor:pointer; display:flex; gap:10px; align-items:baseline; }
+  #palette .item.active { background:#1e3a5f; }
+  #palette .item .name { color:#4fc3f7; font-family:Consolas,monospace; min-width:150px; }
+  #palette .item .desc { color:#8e9aa8; font-size:12px; }
+  #palette .empty { padding:8px 12px; color:#555e6a; font-size:12px; }
 </style>
 </head>
 <body>
@@ -63,6 +71,7 @@
   </div>
   </header>
   <div id="feed"></div>
+  <div id="palette"></div>
   <form id="form">
     <input type="text" id="task" placeholder="输入编程任务（Enter 发送）…" autocomplete="off">
     <button type="submit" class="primary" id="send">运行</button>
@@ -83,8 +92,14 @@ function add(cls, text) {
 
 document.getElementById("form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const task = document.getElementById("task").value.trim();
-  if (!task || running) return;
+  const v = document.getElementById("task").value.trim();
+  if (!v || running) return;
+  if (v.startsWith("/")) { add("user", v); execLine(v); document.getElementById("task").value = ""; return; }
+  submitTask(v);
+});
+
+async function submitTask(task) {
+  if (running || !task) return;
   add("user", task);
   document.getElementById("task").value = "";
   setRunning(true);
@@ -92,13 +107,91 @@ document.getElementById("form").addEventListener("submit", async (e) => {
   const model = document.getElementById("model").value;
   const resp = await fetch("/api/run", { method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ task, mode, model }) });
+    body: JSON.stringify({ task, mode, model, goal: sessionGoal }) });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({detail: "未知错误"}));
     add("error", err.detail || "启动失败"); setRunning(false); return;
   }
   listenEvents();
-});
+}
+
+async function execLine(line) {
+  const [cmd, ...rest] = line.split(/\s+/);
+  const arg = rest.join(" ");
+  if (cmd === "/help") {
+    const card = add("answer", "");
+    card.innerHTML = "<b>命令列表</b>
+" + COMMANDS.map(c => c.name + " — " + c.desc).join("
+");
+    card.style.whiteSpace = "pre-wrap";
+  } else if (cmd === "/status") {
+    const s = await (await fetch("/api/status")).json();
+    add("answer", "运行中: " + s.running + " | 模型: " + s.model +
+        " | 模式: " + s.mode + "
+工作区: " + s.workspace +
+        (sessionGoal ? "
+会话目标: " + sessionGoal : ""));
+  } else if (cmd === "/tools") {
+    const d = await (await fetch("/api/tools")).json();
+    const card = add("answer", "");
+    card.innerHTML = "<b>模型可用工具 (" + d.tools.length + ")</b>
+" +
+        d.tools.map(t => "  " + t.name + " — " + t.description).join("
+");
+    card.style.whiteSpace = "pre-wrap";
+  } else if (cmd === "/model") {
+    if (!arg) {
+      const d = await (await fetch("/api/models")).json();
+      const cur = document.getElementById("model").value;
+      if (d.models.length) {
+        if (!d.models.includes(cur)) document.getElementById("model").value = d.models[0];
+        add("answer", "在线模型:
+" + d.models.map(m =>
+          (m === document.getElementById("model").value ? "  <- " : "  ") + m).join("
+"));
+      } else add("error", "在线模型列表不可用");
+    } else {
+      document.getElementById("model").value = arg;
+      add("answer", "模型已切换: " + arg + "（下次运行生效）");
+    }
+  } else if (cmd === "/mode") {
+    if (["full","goal","plan","dry-run"].includes(arg)) {
+      document.getElementById("mode").value = arg;
+      add("answer", "模式已切换: " + arg);
+    } else add("answer", "当前模式: " + document.getElementById("mode").value +
+               "（用法: /mode full|goal|plan|dry-run）");
+  } else if (cmd === "/goal") {
+    if (arg === "clear") { sessionGoal = ""; add("answer", "会话目标已清除"); }
+    else if (arg) { sessionGoal = arg; add("answer", "会话目标已设置: " + arg +
+               "
+将随每次运行注入系统提示"); }
+    else add("answer", sessionGoal ? "当前会话目标: " + sessionGoal : "未设置（用法: /goal <text>）");
+  } else if (cmd === "/sessions") {
+    const d = await (await fetch("/api/sessions")).json();
+    const card = add("answer", "");
+    card.innerHTML = d.sessions.length
+        ? "<b>会话列表:</b>
+" + d.sessions.map((s, i) => (i + 1) + ". " + s.task).join("
+")
+        : "没有会话——先运行一次任务";
+    card.style.whiteSpace = "pre-wrap";
+  } else if (cmd === "/resume") {
+    setRunning(true);
+    const resp = await fetch("/api/resume", { method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ task: arg || "继续之前的任务", goal: sessionGoal,
+                             resume: "" }) });
+    if (!resp.ok) { add("error", (await resp.json().catch(() => ({}))).detail || "恢复失败");
+      setRunning(false); return; }
+    listenEvents();
+  } else if (cmd === "/clear") {
+    feed.innerHTML = "";
+  } else {
+    add("error", "未知命令: " + cmd + "（/help 查看命令列表）");
+  }
+}
+
+async function listenEvents() {
 
 function setRunning(v) {
   running = v;
@@ -106,6 +199,81 @@ function setRunning(v) {
   document.getElementById("stop").style.display = v ? "inline-block" : "none";
   document.getElementById("send").disabled = v;
 }
+
+/* ── 斜杠命令面板（对标 Claude Code）── */
+let sessionGoal = "";
+const COMMANDS = [
+  {name: "/help",    desc: "显示命令帮助", hasArgs: false},
+  {name: "/status",  desc: "显示运行状态与当前工作区", hasArgs: false},
+  {name: "/tools",   desc: "列出模型可用的 17 个工具", hasArgs: false},
+  {name: "/model",   desc: "切换模型（无参数显示在线列表，可按序号选择）", hasArgs: true},
+  {name: "/mode",    desc: "切换执行模式 full/goal/plan/dry-run", hasArgs: true},
+  {name: "/goal",    desc: "设置会话目标（注入后续每次运行）", hasArgs: true},
+  {name: "/sessions",desc: "列出会话（含任务预览）", hasArgs: false},
+  {name: "/resume",  desc: "恢复会话（无参=最新；或会话序号）", hasArgs: true},
+  {name: "/clear",   desc: "清空对话显示", hasArgs: false},
+];
+const inputEl = document.getElementById("task");
+const paletteEl = document.getElementById("palette");
+let palItems = [], palIndex = -1;
+
+function renderPalette(items) {
+  palItems = items; palIndex = items.length ? 0 : -1;
+  paletteEl.innerHTML = "";
+  if (!items.length) {
+    paletteEl.innerHTML = '<div class="empty">没有匹配的命令</div>';
+  } else {
+    items.forEach((c, i) => {
+      const div = document.createElement("div");
+      div.className = "item" + (i === palIndex ? " active" : "");
+      div.innerHTML = '<span class="name">' + c.name + '</span>' +
+                      '<span class="desc">' + c.desc + '</span>';
+      div.onclick = () => pickPalette(c);
+      paletteEl.appendChild(div);
+    });
+  }
+  paletteEl.style.display = "block";
+}
+function hidePalette() { paletteEl.style.display = "none"; palItems = []; palIndex = -1; }
+function movePalette(dir) {
+  if (!palItems.length) return;
+  palIndex = (palIndex + dir + palItems.length) % palItems.length;
+  [...paletteEl.querySelectorAll(".item")].forEach((el, i) =>
+    el.classList.toggle("active", i === palIndex));
+}
+function pickPalette(c) {
+  if (c.hasArgs) { inputEl.value = c.name + " "; hidePalette(); inputEl.focus(); }
+  else { inputEl.value = c.name; hidePalette(); execLine(c.name); }
+}
+function updatePalette() {
+  const v = inputEl.value;
+  if (!v.startsWith("/") || running) { hidePalette(); return; }
+  const token = v.split(/\s+/)[0];
+  const matches = COMMANDS.filter(c => c.name.startsWith(token));
+  renderPalette(matches);
+}
+inputEl.addEventListener("input", updatePalette);
+inputEl.addEventListener("keydown", (e) => {
+  const v = inputEl.value;
+  const paletteOpen = paletteEl.style.display === "block";
+  if (e.key === "Escape" && paletteOpen) { hidePalette(); e.preventDefault(); return; }
+  if (paletteOpen && e.key === "ArrowDown") { movePalette(1); e.preventDefault(); return; }
+  if (paletteOpen && e.key === "ArrowUp") { movePalette(-1); e.preventDefault(); return; }
+  if (e.key === "Tab" && paletteOpen && palItems[palIndex]) {
+    inputEl.value = palItems[palIndex].name + (palItems[palIndex].hasArgs ? " " : "");
+    updatePalette(); e.preventDefault(); return;
+  }
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    if (paletteOpen && palItems[palIndex] && v.trim() === palItems[palIndex].name && palItems[palIndex].hasArgs) {
+      inputEl.value = palItems[palIndex].name + " ";
+      updatePalette(); return;  // 需要参数的命令：先补全再让用户填
+    }
+    hidePalette();
+    if (v.startsWith("/")) execLine(v.trim());
+    else submitTask(v.trim());
+  }
+});
 
 let aborting = false;
 async function listenEvents() {

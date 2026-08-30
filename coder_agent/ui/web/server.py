@@ -40,6 +40,7 @@ class RunRequest(BaseModel):
     mode: str | None = None
     model: str | None = None
     resume: str | None = None
+    goal: str | None = None
 
 
 class ModelRequest(BaseModel):
@@ -53,7 +54,7 @@ def index() -> HTMLResponse:
 
 @app.post("/api/run")
 def api_run(req: RunRequest):
-    result = get_manager().start(req.task, mode=req.mode, model=req.model)
+    result = get_manager().start(req.task, mode=req.mode, model=req.model, goal=req.goal)
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result.get("error"))
     return result
@@ -149,6 +150,28 @@ def api_workspace(req: dict):
 @app.get("/api/workspace")
 def api_get_workspace():
     return {"workspace": str(get_manager().workspace)}
+
+
+@app.get("/api/tools")
+def api_tools():
+    return {"tools": get_manager().tool_specs()}
+
+
+@app.get("/api/models")
+def api_models():
+    import urllib.request
+
+    base = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+    key = os.getenv("OPENAI_API_KEY") or ""
+    try:
+        req = urllib.request.Request(
+            f"{base}/models", headers={"Authorization": f"Bearer {key}"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        models = sorted(str(m.get("id")) for m in data.get("data", []) if m.get("id"))
+        return {"models": models}
+    except Exception:
+        return {"models": []}
 
 
 @app.get("/api/status")

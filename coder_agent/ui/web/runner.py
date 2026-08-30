@@ -36,6 +36,16 @@ class RunManager:
         self.model = "agnes-2.5-flash"
         self.mode = "full"
 
+    def tool_specs(self) -> list[dict]:
+        """当前工作区下模型可用的工具清单（/tools 命令数据源）。"""
+        agent = self._agent_factory()
+        specs = []
+        for schema in agent.registry.list_tools():
+            fn = schema.get("function", {})
+            specs.append({"name": fn.get("name", "?"),
+                          "description": (fn.get("description") or "")[:100]})
+        return specs
+
     def _default_agent_factory(self):
         from coder_agent.agent import Agent
         from coder_agent.verifier import Verifier
@@ -54,7 +64,7 @@ class RunManager:
         return self._thread is not None and self._thread.is_alive()
 
     def start(self, task: str, mode: str | None = None, model: str | None = None,
-              resume_path: str | None = None) -> dict:
+              resume_path: str | None = None, goal: str | None = None) -> dict:
         with self._lock:
             if self.running:
                 return {"ok": False, "error": "已有任务在运行——请先停止或等待完成"}
@@ -65,6 +75,7 @@ class RunManager:
         self._final_answer = None
         self._error = None
         self._events = queue.Queue()  # 新运行清空事件
+        self._pending_goal = goal
         self._thread = threading.Thread(
             target=self._run, args=(task, resume_path), daemon=True)
         self._thread.start()
@@ -77,6 +88,8 @@ class RunManager:
         try:
             agent = self._agent_factory()
             self._agent = agent
+            if self._pending_goal:
+                agent.state.task_goal = self._pending_goal  # 注入系统提示
             if resume_path:
                 from coder_agent.journal import load_journal, replay_state
                 restored = load_journal(resume_path)
