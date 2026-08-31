@@ -893,12 +893,16 @@ function appendToolToTurn(tab, ev) {
   const mark = isPolicy ? '<span class="fail">🚦</span>'
     : ev.success ? '<span class="ok">✓</span>' : '<span class="fail">✗</span>';
   const label = isPolicy ? " 策略拦截" : "";
+  // 子代理委托：报告单独标注
+  const isSubagent = ev.tool === "task";
+  const bodyLabel = isSubagent ? "<span class='res-label'>🧩 子代理报告</span>\n" : "";
   det.innerHTML = "<summary>" + mark +
     " <span class='tool-name'>" + escHtml(ev.tool) + "</span>" +
     toolBadge(ev.tool) + label +
     (ev.target ? " <span class='tool-target'>→ " + escHtml(ev.target) + "</span>" : "") +
     "</summary><div class='body'>" +
     (ev.detail ? "<span class='err-label'>" + (isPolicy ? "policy" : "error") + "</span>\n" + escHtml(ev.detail) + "\n" : "") +
+    bodyLabel +
     (ev.preview || "(无输出)") + "</div>";
   body.appendChild(det);
   // turn 摘要行显示动作进展（不展开也能看到每步做了什么）
@@ -1010,9 +1014,13 @@ function onEvent(ev, tab) {
     clearPending(tab);
     const p = document.createElement("div");
     p.className = "tool-pending";
-    p.innerHTML = '<span class="spin">⏳</span> 正在调用 <b style="color:var(--accent);">' +
-      escHtml(ev.tool) + '</b>' +
-      (ev.target ? " <span style='color:var(--muted);'>→ " + escHtml(ev.target) + "</span>" : "");
+    const isTask = ev.tool === "task";
+    p.innerHTML = (isTask
+        ? '<span class="spin">🧩</span> 正在委托子代理 <b style="color:var(--accent2);">' +
+          (ev.target ? escHtml(ev.target) : "执行子任务") + '</b>…'
+        : '<span class="spin">⏳</span> 正在调用 <b style="color:var(--accent);">' +
+          escHtml(ev.tool) + '</b>' +
+          (ev.target ? " <span style='color:var(--muted);'>→ " + escHtml(ev.target) + "</span>" : ""));
     if (tab.turnEl) tab.turnEl.querySelector(".turn-body").appendChild(p);
     else tab.feedEl.appendChild(p);
     tab.pendingEl = p;
@@ -1562,6 +1570,15 @@ async function loadFiles(dir, container, depth) {
 }
 async function viewFile(path) {
   const r = await fetch("/api/file?path=" + encodeURIComponent(path));
+  if (r.status === 403) {
+    // 路径逃逸演示：显示安全拦截（框架 _resolve_within commonpath 校验）
+    document.getElementById("fileTitle").textContent = "🔒 路径越界被拦截";
+    document.getElementById("fileBody").textContent =
+      "该路径位于工作区之外，已被 Coder-Agent 的路径安全机制拦截（_resolve_within / commonpath 校验）。\n\n" +
+      "请求路径: " + path + "\n\n这是框架的路径 containment 创新点——agent 无法读写工作区外的任意文件。";
+    document.getElementById("fileModal").classList.add("show");
+    return;
+  }
   if (!r.ok) { const e = await r.json().catch(() => ({})); const t = activeTab(); if (t) addTabMsg(t, "error", e.detail || "无法查看"); return; }
   const d = await r.json();
   document.getElementById("fileTitle").textContent = d.path + "  (" + d.size + " 字符)";
