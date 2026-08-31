@@ -493,6 +493,7 @@ function createTab(title) {
   const tab = {
     id, title: title || "新会话",
     runId: null, es: null, running: false,
+    closed: false,  // 关闭标记：防止 pending 队列续跑启动孤立 run
     goal: AppState.sessionGoal || "",  // 会话级目标（新会话继承全局默认）
     mode: document.getElementById("mode").value,  // 会话级模式（继承当前）
     queue: [],  // 输入队列（运行中提交的任务排队，完成后自动执行）
@@ -569,6 +570,8 @@ function switchTab(id) {
 function closeTab(id) {
   const tab = Tabs.list.find(t => t.id === id);
   if (!tab) return;
+  tab.closed = true;          // 防止 pending 队列续跑启动孤立 run
+  tab.queue = [];             // 清空队列
   if (tab.running && tab.runId) {
     fetch("/api/abort", {
       method: "POST",
@@ -1177,7 +1180,7 @@ function continueFromHistory(tab) {
 
 async function submitTask(task, tabOverride) {
   const tab = tabOverride || activeTab();  // 队列续跑时绑定原 tab，避免切 tab 串会话
-  if (!tab || !task) return;
+  if (!tab || tab.closed || !task) return;  // closed：tab 已关闭，不启动孤立 run
   // 运行中提交 → 进入队列（当前运行结束后自动执行），并可改序/删除
   if (tab.running) {
     tab.queue.push(task);
