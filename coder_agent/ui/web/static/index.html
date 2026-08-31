@@ -1131,12 +1131,12 @@ function onEvent(ev, tab) {
       tab.feedEl.appendChild(div);
       scrollFeedEl(tab.feedEl, true);
     }
-    // 队列：自动执行下一项
+    // 队列：自动执行下一项（绑定原 tab，切换会话不影响）
     if (tab.queue.length) {
       const next = tab.queue.shift();
       updateQueueBar(tab);
       addTabMsg(tab, "turn", "⏳ 开始执行队列下一项…");
-      setTimeout(() => submitTask(next), 300);
+      setTimeout(() => submitTask(next, tab), 300);
     }
     loadSessions();
     if (document.getElementById("activityPanel").classList.contains("show")) {
@@ -1175,8 +1175,8 @@ function continueFromHistory(tab) {
   addTabMsg(tab, "turn", "📜 已续接该会话——新对话将追加到同一历史记录");
 }
 
-async function submitTask(task) {
-  const tab = activeTab();
+async function submitTask(task, tabOverride) {
+  const tab = tabOverride || activeTab();  // 队列续跑时绑定原 tab，避免切 tab 串会话
   if (!tab || !task) return;
   // 运行中提交 → 进入队列（当前运行结束后自动执行），并可改序/删除
   if (tab.running) {
