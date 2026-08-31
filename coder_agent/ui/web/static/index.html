@@ -498,6 +498,7 @@ function createTab(title) {
     queue: [],  // 输入队列（运行中提交的任务排队，完成后自动执行）
     turnEl: null, turnStep: null, streamEl: null, pendingEl: null,
     stateInfo: null, endedShown: false,
+    verifierStats: { pass: 0, fail: 0 },
     stats: { tokens: 0, steps: 0, tools: {}, writes: [], reads: [] },
     viewingHistory: false, sessionFile: null, sessionData: null, sessionStats: null,
     histTurns: null, histRendered: 0,
@@ -1034,6 +1035,10 @@ function onEvent(ev, tab) {
   } else if (ev.kind === "verifier") {
     clearPending(tab);
     appendVerifierCard(tab, ev);
+    // 累积 Verifier 通过/失败（Goal 达成进度数据源）
+    if (ev.passed) tab.verifierStats.pass++;
+    else if (!ev.accept_reason) tab.verifierStats.fail++;
+    refreshActivity();
   } else if (ev.kind === "event") {
     // 框架内部事件：格式错误/循环检测/恢复/截断/预算（约束恢复与错误处理）
     renderFrameworkEvent(tab, ev);
@@ -2401,18 +2406,40 @@ function renderActivity() {
     "<br>📊 当前估算占用: " + (used ? used.toLocaleString() : "0") + " (" + pct + "%)" +
     (pct >= 80 ? "<br>⚠️ 接近预算，即将压缩旧消息" : "") +
     "</div></div>";
-  // Agent 状态（AgentState，严格对应框架 to_status_prompt 字段）
+  // Goal 达成进度（基于 step 进度 + Verifier 通过率 + 子目标数）
   const si = tab ? tab.stateInfo : null;
-  if (si) {
-    const stepPct = Math.min(100, Math.round((si.step || 0) / (si.max_steps || 50) * 100));
+  const gGoal = tab ? tab.goal : "";
+  if (si && gGoal) {
+    const stepP = Math.min(100, Math.round((si.step || 0) / (si.max_steps || 50) * 100));
+    const vs = tab.verifierStats || { pass: 0, fail: 0 };
+    const vTotal = vs.pass + vs.fail;
+    // 进度 = 步骤进度 60% + Verifier 通过贡献 40%（有校验时按通过率加权）
+    const vScore = vTotal ? Math.round(vs.pass / vTotal * 100) : 0;
+    const progress = Math.min(99, Math.round(stepP * 0.6 + (vTotal ? vScore * 0.4 : 0)));
+    const done = vs.pass >= 1 && vs.fail === 0;  // 通过且有校验 → 视为首次达成
+    const barColor = done ? "var(--ok)" : (vTotal && vs.fail > 0 ? "var(--err)" : "var(--accent)");
+    html += "<div class='act-section'><div class='as-title'>🎯 目标达成进度</div>" +
+      "<div class='act-goal'>" + escHtml(gGoal.length > 60 ? gGoal.slice(0, 60) + "…" : gGoal) +
+      "<div class='tbar' style='margin:8px 0;height:8px;'>" +
+      "<i style='width:" + (done ? 100 : progress) + "%;background:" + barColor + ";'></i></div>" +
+      (done ? "✅ 目标达成（Verifier 全部通过）<br>" : "") +
+      "⚙ 步骤: " + (si.step || 0) + "/" + (si.max_steps || 50) + " · " +
+      "✅ Verifier 通过 " + vs.pass + " 次" + (vs.fail ? "，❌ 失败 " + vs.fail + " 次" : "") +
+      (si.subgoals ? " · 🧩 子目标 " + si.subgoals + " 个" : "") +
+      "</div></div>";
+  }
+  // Agent 状态（AgentState，严格对应框架 to_status_prompt 字段）
+  const si2 = tab ? tab.stateInfo : null;
+  if (si2) {
+    const stepPct = Math.min(100, Math.round((si2.step || 0) / (si2.max_steps || 50) * 100));
     html += "<div class='act-section'><div class='as-title'>Agent 状态</div>" +
-      "<div class='act-goal'>⚙ Step " + (si.step || 0) + "/" + (si.max_steps || 50) +
+      "<div class='act-goal'>⚙ Step " + (si2.step || 0) + "/" + (si2.max_steps || 50) +
       "<div class='tbar' style='margin:6px 0;'><i style='width:" + stepPct + "%;background:var(--accent2);'></i></div>" +
-      (si.goal ? "🎯 Goal: " + escHtml(si.goal) + "<br>" : "") +
-      (si.editing ? "✏️ 正在编辑: " + escHtml(si.editing) + "<br>" : "") +
-      ((si.modified || []).length ? "🔧 已修改: " + escHtml(si.modified.join(", ")) + "<br>" : "") +
-      ((si.reads || []).length ? "👁 已读取: " + escHtml(si.reads.join(", ")) + "<br>" : "") +
-      (si.subgoals ? "✅ 完成子目标: " + si.subgoals + " 个<br>" : "") +
+      (si2.goal ? "🎯 Goal: " + escHtml(si2.goal) + "<br>" : "") +
+      (si2.editing ? "✏️ 正在编辑: " + escHtml(si2.editing) + "<br>" : "") +
+      ((si2.modified || []).length ? "🔧 已修改: " + escHtml(si2.modified.join(", ")) + "<br>" : "") +
+      ((si2.reads || []).length ? "👁 已读取: " + escHtml(si2.reads.join(", ")) + "<br>" : "") +
+      (si2.subgoals ? "✅ 完成子目标: " + si2.subgoals + " 个<br>" : "") +
       "</div></div>";
   }
   // Memory 记忆（框架 Memory.long_term 键值对）
