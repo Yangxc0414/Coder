@@ -2415,11 +2415,16 @@ function renderActivity() {
       (si.subgoals ? "✅ 完成子目标: " + si.subgoals + " 个<br>" : "") +
       "</div></div>";
   }
-  // Memory 记忆（框架 Memory.long_term 键）
-  if (tab && tab.stateInfo && (tab.stateInfo.memory_keys || []).length) {
+  // Memory 记忆（框架 Memory.long_term 键值对）
+  if (tab && tab.stateInfo &&
+      ((tab.stateInfo.memory_entries || []).length || (tab.stateInfo.memory_keys || []).length)) {
+    const entries = tab.stateInfo.memory_entries || [];
     html += "<div class='act-section'><div class='as-title'>🧠 记忆（Memory）</div>" +
-      "<div class='act-goal'>" + tab.stateInfo.memory_keys.map(k =>
-        "<b style='color:var(--accent);'>" + escHtml(k) + "</b>").join(" · ") +
+      "<div class='act-goal'>" + (entries.length
+        ? entries.map(e => "<b style='color:var(--accent);'>" + escHtml(e.k) +
+            "</b>: " + escHtml(e.v)).join("<br>")
+        : (tab.stateInfo.memory_keys || []).map(k =>
+            "<b style='color:var(--accent);'>" + escHtml(k) + "</b>").join(" · ")) +
       "</div></div>";
   }
   html += "<div class='act-section'><div class='as-title'>当前配置</div>" +
