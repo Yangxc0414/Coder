@@ -1150,7 +1150,20 @@ function listenEvents(tab) {
   if (tab.es) tab.es.close();
   tab.es = new EventSource("/api/events?run_id=" + encodeURIComponent(tab.runId));
   tab.es.onmessage = (e) => onEvent(JSON.parse(e.data), tab);
-  tab.es.onerror = () => { console.log("SSE 断开，等待重连..."); };
+  tab.es.onerror = () => {
+    // SSE 断开：若 done 事件可能丢失（断连期间 run 已完成），轮询兜底
+    if (tab.running && tab.runId) {
+      fetch("/api/status").then(r => r.json()).then(st => {
+        const runs = st.runs || [];
+        const mine = runs.find(x => x.run_id === tab.runId);
+        // 我的 run 已不在活跃列表（完成/终止）且未收到 done → 手动收尾
+        if (mine && !mine.running) {
+          onEvent({ kind: "done" }, tab);
+        }
+      }).catch(() => {});
+    }
+    console.log("SSE 断开，正在恢复…");
+  };
 }
 
 /* ═══════════ 运行 / 停止 ═══════════ */
@@ -1214,10 +1227,15 @@ async function submitTask(task) {
 async function abort() {
   const tab = activeTab();
   if (!tab) return;
+  if (!tab.runId) {  // 防御：无 run_id 时只本地复位，不误伤其他并行会话
+    setRunning(tab, false);
+    addTabMsg(tab, "turn", "没有正在运行的任务");
+    return;
+  }
   await fetch("/api/abort", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ run_id: tab.runId || "" })
+    body: JSON.stringify({ run_id: tab.runId })
   });
   addTabMsg(tab, "turn", "■ 停止请求已发送…");
 }
