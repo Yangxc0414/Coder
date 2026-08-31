@@ -1202,6 +1202,7 @@ async function submitTask(task, tabOverride) {
   inputEl.value = "";
   inputEl.style.height = "auto";
   tab.endedShown = false;  // 重置：本次运行完成时重新显示完成提示
+  tab.verifierStats = { pass: 0, fail: 0 };  // 重置：Goal 进度按本次运行统计，不残留上次
   setRunning(tab, true);
   tab.title = task.length > 18 ? task.slice(0, 18) + "…" : task;
   tab.btn.querySelector(".t-title").textContent = tab.title;
@@ -2312,6 +2313,7 @@ async function execLine(line) {
     }
     // 恢复会话也创建 turn 容器（用户消息可见，与 /run 行为一致）
     addTurnUserMsg(tab, arg || "继续之前的任务");
+    tab.verifierStats = { pass: 0, fail: 0 };  // 重置：Goal 进度按本次恢复运行统计
     setRunning(tab, true);
     const resp = await fetch("/api/resume", {
       method: "POST",
