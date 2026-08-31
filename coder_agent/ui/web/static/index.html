@@ -1492,6 +1492,7 @@ async function loadFiles(dir, container, depth) {
   const target = dir || ws;
   const data = await (await fetch("/api/fs/browse?path=" + encodeURIComponent(target))).json();
   const fl = await (await fetch("/api/files?path=" + encodeURIComponent(target))).json();
+  const files = fl.files || [];  // 防御：异常响应不崩溃
   if (!container) rootContainer.innerHTML = "";
   const d = depth || 0;
   const pad = 8 + d * 14;
@@ -1539,7 +1540,7 @@ async function loadFiles(dir, container, depth) {
     };
     rootContainer.appendChild(row);
   });
-  fl.files.slice(0, 50).forEach(f => {
+  files.slice(0, 50).forEach(f => {
     const b = document.createElement("div");
     b.className = "file-item";
     b.style.paddingLeft = pad + "px";
@@ -1547,10 +1548,10 @@ async function loadFiles(dir, container, depth) {
     b.onclick = () => viewFile(target + "\\" + f);
     rootContainer.appendChild(b);
   });
-  if (fl.files.length > 50) {
+  if (files.length > 50) {
     const more = document.createElement("div");
     more.style.cssText = "font-size:11px;color:var(--faint);padding:8px;";
-    more.textContent = "... 还有 " + (fl.files.length - 50) + " 个文件";
+    more.textContent = "... 还有 " + (files.length - 50) + " 个文件";
     rootContainer.appendChild(more);
   }
 }
