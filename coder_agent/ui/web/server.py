@@ -525,6 +525,38 @@ def api_replays(limit: int = 5):
     return {"traces": get_manager().recent_replays(limit=limit)}
 
 
+@app.get("/api/health")
+def api_health():
+    """演示前健康检查：后端侧测 API 连通性与延迟（避免浏览器 CORS 限制）。"""
+    import time as _time
+
+    m = get_manager()
+    env_url = os.getenv("OPENAI_BASE_URL")
+    base_url = m.base_url or env_url or "https://api.agnes-ai.cn/v1"
+    info = m.context_info()
+    result = {
+        "model": m.model,
+        "base_url": base_url,
+        "api_key_set": bool(m.api_key or os.getenv("OPENAI_API_KEY")),
+        "workspace": str(m.workspace),
+        "context_window": info["context_window"],
+        "running": m.running,
+    }
+    from coder_agent.llm.client import LLMClient
+
+    client = LLMClient(model=m.model, api_key=m.api_key, base_url=m.base_url)
+    t0 = _time.time()
+    try:
+        models = client.list_models()
+        result["ok"] = bool(models)
+        result["models_count"] = len(models) if models else 0
+    except Exception as e:
+        result["ok"] = False
+        result["error"] = f"{type(e).__name__}: {e}"
+    result["latency_ms"] = int((_time.time() - t0) * 1000)
+    return result
+
+
 @app.get("/api/replay")
 async def api_replay(trace: str):
     """回放一条已录制的 trace 文件——完全离线，不依赖 API。"""

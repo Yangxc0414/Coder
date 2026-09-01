@@ -75,7 +75,25 @@ class LLMClient:
             models = self._client.models.list()
             return sorted(str(m.id) for m in models.data if m.id)
         except Exception:
+            pass
+        # SDK transport 受阻时的兜底：标准库 urllib 走不同的 TLS 路径，
+        # 健康检查据此能区分"网络被干扰"与"端点真的不可用"。
+        try:
+            return self._list_models_urllib()
+        except Exception:
             return []
+
+    def _list_models_urllib(self) -> list[str]:
+        """标准库版模型列表（SDK 传输层异常时的回退路径）。"""
+        import urllib.request
+
+        base = (self.base_url or "https://api.openai.com/v1").rstrip("/")
+        key = self._client.api_key or ""
+        req = urllib.request.Request(
+            base + "/models", headers={"Authorization": f"Bearer {key}"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+        return sorted(str(m["id"]) for m in data.get("data", []) if m.get("id"))
 
     def chat(
         self,

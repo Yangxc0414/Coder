@@ -27,10 +27,10 @@ COMMANDS: list[dict] = [
     {"name": "/trace", "desc": "显示最近一次运行的工具追踪摘要", "hasArgs": False},
     {"name": "/clear", "desc": "清空对话显示", "hasArgs": False},
     # ── 演示回放模式 ─────────────────────────────────────────────────────
-    {"name": "/record", "desc": "录制本次运行到 trace 文件（用于离线回放）",
+    {"name": "/record", "desc": "开启录制：下一次运行的事件写入 trace（录一次即止）",
      "hasArgs": True,
-     "argHint": "<输出路径，如 D:/replays/demo.jsonl>"},
-    {"name": "/replay", "desc": "从 trace 文件回放事件流（不依赖 API）",
+     "argHint": "<任务备注，可留空；trace 存于 ~/.coder_replays/>"},
+    {"name": "/replay", "desc": "回放 trace 事件流（不依赖 API；无参=最近一条）",
      "hasArgs": True,
      "argHint": "<trace 文件路径，或留空选最近一条>"},
     {"name": "/health", "desc": "检查 API 连通性与延迟（演示前必跑）", "hasArgs": False},

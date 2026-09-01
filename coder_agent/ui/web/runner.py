@@ -390,6 +390,9 @@ class RunManager:
                 session.messages = list(
                     getattr(session.agent, "messages", []) or [])
                 session.trace = getattr(session.agent, "trace", None)
+            # 录制一次性：本次运行结束即停止录制，避免后续无关任务
+            # 继续追加写进同一个 trace 文件
+            self._recording_path = None
             try:
                 if session.journal is not None:
                     session.journal.close()

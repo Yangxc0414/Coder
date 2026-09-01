@@ -339,8 +339,6 @@
     <span class="hist-title" id="histTitle"></span>
     <span class="hist-actions">
       <button onclick="downloadSession()">⤓ 导出</button>
-      <button id="replayBtn" title="将此会话作为 trace 回放（离线演示）"
-              onclick="replayFromHistory()" style="display:none;">▶ 回放</button>
     </span>
   </div>
   <div id="feedArea"></div>
@@ -1232,29 +1230,6 @@ async function replayEvents(tracePath, tab) {
     tab.feedEl.appendChild(div);
     scrollFeedEl(tab.feedEl, true);
   }
-}
-
-async function replayFromHistory() {
-  const tab = activeTab();
-  if (!tab || !tab.sessionFile) return;
-  // 把当前会话 JSONL 复制到 ~/.coder_replays/ 作为 trace
-  const recDir = Path.home ? Path.home() + "/.coder_replays" : "/tmp/coder_replays";
-  const stamp = new Date().toISOString().replace(/[:.]/g, "");
-  const src = tab.sessionFile;
-  // 用 /api/fs/pick 不可行，直接用 fetch 读取原始文件并转成 trace
-  // 实际上直接调 /api/session 拿到消息，重放到 replay_sse 格式
-  // 简化：调用 server 端的 replay 逻辑——先保存到 replays 目录
-  const resp = await fetch("/api/session?file=" + encodeURIComponent(src));
-  if (!resp.ok) {
-    addTabMsg(tab, "error", "无法加载会话数据");
-    return;
-  }
-  const data = await resp.json();
-  // 构造最小 trace：只有 meta + events 框架事件
-  // 由于 replay_events 期望 SSE 事件格式，我们直接让后端转换
-  // 这里采用更简单的方案：后端提供 /api/replay/session?file=...
-  // 但为快速落地，先提示用户并给出 fallback
-  addTabMsg(tab, "turn", "⚠️ 回放功能需要先把会话存为 trace。请先运行一次任务，或用 /record 录制后再回放。");
 }
 
 /* ═══════════ 运行 / 停止 ═══════════ */
@@ -2463,21 +2438,21 @@ async function execLine(line) {
     document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
     renderWelcome(tab);
   } else if (cmd === "/record") {
-    if (!arg) {
-      addTabMsg(tab, "error", "/record 需要提供输出路径，例如: /record D:/replays/demo.jsonl");
-    } else if (tab.running) {
+    if (tab.running) {
       addTabMsg(tab, "error", "当前有任务在运行，无法开始录制");
     } else {
+      // arg 仅作任务备注；trace 实际由后端写入 ~/.coder_replays/（路径防逃逸）
       const resp = await fetch("/api/record/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task: "演示任务", mode: tab.mode || "full" })
+        body: JSON.stringify({ task: arg || "演示任务", mode: tab.mode || "full" })
       });
       const d = await resp.json().catch(() => ({}));
       if (d.ok) {
-        // 把路径存入 tab，后续 /run 时自动写入
-        tab._recordingPath = arg;
-        addTabMsg(tab, "answer", "✅ 录制已开始 → " + arg + "\n现在运行任务，结束后用 /replay 回放");
+        addTabMsg(tab, "answer",
+          "✅ 录制已开启（仅对下一次运行生效）\n" +
+          "  保存位置: " + (d.trace || "~/.coder_replays/") + "\n" +
+          "现在输入任务开始运行；结束后用 /replay（不带参数）回放这条 trace");
       } else {
         addTabMsg(tab, "error", "录制启动失败: " + (d.detail || JSON.stringify(d)));
       }
@@ -2501,28 +2476,21 @@ async function execLine(line) {
     // 并行：打开回放 SSE + 显示状态
     await replayEvents(tracePath, tab);
   } else if (cmd === "/health") {
-    const s = await (await fetch("/api/status")).json();
-    const cfg = await (await fetch("/api/config")).json();
+    // 后端侧测 API 连通性与延迟（浏览器直连外部 API 会被 CORS 拦截）
+    const h = await (await fetch("/api/health")).json();
     const lines = [
       "🩺 健康检查",
-      "  模型: " + (cfg.model || "?"),
-      "  API:  " + (cfg.base_url || "未配置"),
-      "  工作区: " + (s.workspace || "?"),
-      "  上下文: " + (cfg.context_window || "?") + " tokens",
-      "  运行中会话: " + (s.runs || []).length,
+      "  模型: " + (h.model || "?"),
+      "  API:  " + (h.base_url || "未配置") + (h.api_key_set ? "" : "（⚠ 未配置 key）"),
+      "  工作区: " + (h.workspace || "?"),
+      "  上下文窗口: " + (h.context_window || "?") + " tokens",
+      "  运行中会话: " + (h.running ? "有" : "无"),
+      "  API 连通: " + (h.ok ? "✓ 正常" : "✗ 失败" + (h.error ? "（" + h.error + "）" : "")),
+      "  API 延迟: " + (h.latency_ms != null ? h.latency_ms + "ms" : "?"),
     ];
-    // 测 API 延迟
-    const t0 = Date.now();
-    try {
-      const tResp = await fetch(cfg.base_url + "/models", {
-        headers: { "Authorization": "Bearer " + (cfg.api_key_set ? "xxx" : "") }
-      });
-      const dt = Date.now() - t0;
-      lines.push("  API 延迟: " + dt + "ms (" + (tResp.ok ? "✓ 连通" : "✗ 失败") + ")");
-    } catch (e) {
-      lines.push("  API 延迟: 错误 - " + e.message);
-    }
-    lines.push("\n建议：演示前跑 /health，确保 API 延迟 < 500ms");
+    lines.push(h.ok
+      ? (h.latency_ms < 500 ? "\n✓ 延迟正常，可以开始演示" : "\n⚠ 延迟偏高，建议准备 /replay 回放兜底")
+      : "\n✗ API 不可用——演示请改用 /replay 回放模式（完全离线）");
     const card = addTabMsg(tab, "answer", "");
     card.innerHTML = lines.join("<br>");
     card.style.whiteSpace = "pre-wrap";
@@ -2590,13 +2558,14 @@ function renderActivity() {
   const budget = cw.budget || 0;
   const used = Math.min(st.tokens, budget) || 0;
   const pct = budget ? Math.round(used / budget * 100) : 0;
-  html += "<div class='act-section'><div class='as-title'>上下文压缩</div>" +
+  html += "<div class='act-section'><div class='as-title'>上下文与 Token</div>" +
     "<div class='act-goal'>📏 预算: " + (budget ? budget.toLocaleString() : "?") +
     " tokens (" + (cw.model || document.getElementById("model").value) +
     " × " + Math.round((cw.ratio || 0.8) * 100) + "%)" +
     (cw.keep_rounds ? "<br>🔒 保留最近 " + cw.keep_rounds + " 轮完整" : "") +
-    "<br>📊 当前估算占用: " + (used ? used.toLocaleString() : "0") + " (" + pct + "%)" +
-    (pct >= 80 ? "<br>⚠️ 接近预算，即将压缩旧消息" : "") +
+    "<br>📊 本次累计消耗: " + (st.tokens ? st.tokens.toLocaleString() : "0") +
+    " tokens（计费口径）" +
+    (pct >= 80 ? "<br>⚠️ 接近预算上限——将触发收尾总结" : "") +
     "</div></div>";
   // Goal 达成进度（基于 step 进度 + Verifier 通过率 + 子目标数）
   const si = tab ? tab.stateInfo : null;
