@@ -43,6 +43,10 @@ class RunRequest(BaseModel):
     goal: str | None = None
 
 
+class ReplayRequest(BaseModel):
+    trace: str  # trace 文件路径
+
+
 class ModelRequest(BaseModel):
     model: str
 
@@ -66,6 +70,31 @@ def api_run(req: RunRequest):
     result = get_manager().start(req.task, mode=req.mode, model=req.model, goal=req.goal)
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result.get("error"))
+    # 演示录制：start() 返回后，hook 会自动写入 trace（runner.py 中注入）
+    m = get_manager()
+    if getattr(m, "_recording_path", None):
+        # 记录任务元信息到 trace 头部（如果还没有 meta）
+        import json as _json, datetime as _dt, pathlib as _P
+        p = _P.Path(m._recording_path)
+        first_line = p.read_text(encoding="utf-8").splitlines()[0]
+        try:
+            meta = _json.loads(first_line)
+            if meta.get("type") != "meta":
+                meta = {}
+        except Exception:
+            meta = {}
+        meta.update({
+            "type": "meta",
+            "task": req.task[:200],
+            "mode": req.mode or m.mode,
+            "model": req.model or m.model,
+            "workspace": str(m.workspace),
+            "started": _dt.datetime.now().isoformat(),
+        })
+        rest = p.read_text(encoding="utf-8").splitlines()[1:]
+        p.write_text(
+            _json.dumps(meta, ensure_ascii=False) + "\n" + "\n".join(rest),
+            encoding="utf-8")
     return result
 
 
@@ -485,6 +514,54 @@ def api_commands():
     """返回可用命令列表（供前端动态加载，与 CLI 共用同一份定义）。"""
     from coder_agent.ui.commands import COMMANDS
     return {"commands": COMMANDS}
+
+
+# ── 演示回放模式 ───────────────────────────────────────────────────────
+
+
+@app.get("/api/replays")
+def api_replays(limit: int = 5):
+    """列出最近的回放 trace 文件（供 /replay 无参时选最近一条）。"""
+    return {"traces": get_manager().recent_replays(limit=limit)}
+
+
+@app.get("/api/replay")
+async def api_replay(trace: str):
+    """回放一条已录制的 trace 文件——完全离线，不依赖 API。"""
+    import json as _json
+    from pathlib import Path as _P
+
+    path = _P(trace).expanduser()
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="trace 文件不存在")
+    # 安全：只允许 ~/.coder_replays/ 下的文件
+    replays_dir = _P.home() / ".coder_replays"
+    try:
+        path.resolve().relative_to(replays_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="路径越界，只能在 ~/.coder_replays/ 内回放")
+
+    manager = get_manager()
+    iter_ = manager.replay_events(path)
+
+    async def gen():
+        try:
+            for event in iter_:
+                yield f"data: {_json.dumps(event, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0)
+        except Exception as e:
+            # 把异常转为前端可消费的 error 事件，避免 StreamingResponse 崩溃
+            yield f"data: {_json.dumps({'kind': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@app.post("/api/record/start")
+def api_record_start(req: RunRequest):
+    """开始录制：返回 trace 路径，后续 /api/run 会自动写入。"""
+    m = get_manager()
+    m._recording_path = m.record_start(req.task, mode=req.mode)
+    return {"ok": True, "trace": m._recording_path}
 
 
 if __name__ == "__main__":

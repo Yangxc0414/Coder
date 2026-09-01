@@ -339,6 +339,8 @@
     <span class="hist-title" id="histTitle"></span>
     <span class="hist-actions">
       <button onclick="downloadSession()">⤓ 导出</button>
+      <button id="replayBtn" title="将此会话作为 trace 回放（离线演示）"
+              onclick="replayFromHistory()" style="display:none;">▶ 回放</button>
     </span>
   </div>
   <div id="feedArea"></div>
@@ -1167,6 +1169,92 @@ function listenEvents(tab) {
     }
     console.log("SSE 断开，正在恢复…");
   };
+}
+
+/* ═══════════ 演示回放模式 ═══════════ */
+async function replayEvents(tracePath, tab) {
+  if (!tab) tab = activeTab();
+  if (!tab || tab.closed) return;
+  // 清空 feed，进入回放状态
+  const w = tab.feedEl.querySelector("#welcome");
+  if (w) w.remove();
+  tab.feedEl.innerHTML = '<div style="color:var(--faint);font-size:12px;padding:20px;text-align:center;">加载回放中…</div>';
+  tab.viewingHistory = false;
+  document.getElementById("historyBar").style.display = "flex";
+  document.getElementById("histTitle").textContent = "📜 回放模式 — " + (tracePath.split("/").pop() || tracePath);
+  document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
+  addTabMsg(tab, "turn", "▶ 开始回放: " + tracePath);
+  setRunning(tab, true);
+  tab.endedShown = false;
+  tab.verifierStats = { pass: 0, fail: 0 };
+  try {
+    const resp = await fetch("/api/replay?trace=" + encodeURIComponent(tracePath));
+    if (!resp.ok) {
+      const e = await resp.json().catch(() => ({}));
+      addTabMsg(tab, "error", "回放失败: " + (e.detail || "HTTP " + resp.status));
+      setRunning(tab, false);
+      return;
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 2);
+        if (!chunk.startsWith("data: ")) continue;
+        try {
+          const ev = JSON.parse(chunk.slice(6));
+          onEvent(ev, tab);
+        } catch (_) { /* 忽略无效 JSON */ }
+      }
+    }
+    // 兜底：缓冲区剩余数据
+    if (buf.trim().startsWith("data: ")) {
+      try {
+        const ev = JSON.parse(buf.trim().slice(6));
+        onEvent(ev, tab);
+      } catch (_) {}
+    }
+  } catch (e) {
+    addTabMsg(tab, "error", "回放异常: " + e.message);
+  }
+  // 回放结束
+  setRunning(tab, false);
+  if (!tab.endedShown) {
+    const div = document.createElement("div");
+    div.className = "turn";
+    div.textContent = "✅ 回放完成";
+    tab.feedEl.appendChild(div);
+    scrollFeedEl(tab.feedEl, true);
+  }
+}
+
+async function replayFromHistory() {
+  const tab = activeTab();
+  if (!tab || !tab.sessionFile) return;
+  // 把当前会话 JSONL 复制到 ~/.coder_replays/ 作为 trace
+  const recDir = Path.home ? Path.home() + "/.coder_replays" : "/tmp/coder_replays";
+  const stamp = new Date().toISOString().replace(/[:.]/g, "");
+  const src = tab.sessionFile;
+  // 用 /api/fs/pick 不可行，直接用 fetch 读取原始文件并转成 trace
+  // 实际上直接调 /api/session 拿到消息，重放到 replay_sse 格式
+  // 简化：调用 server 端的 replay 逻辑——先保存到 replays 目录
+  const resp = await fetch("/api/session?file=" + encodeURIComponent(src));
+  if (!resp.ok) {
+    addTabMsg(tab, "error", "无法加载会话数据");
+    return;
+  }
+  const data = await resp.json();
+  // 构造最小 trace：只有 meta + events 框架事件
+  // 由于 replay_events 期望 SSE 事件格式，我们直接让后端转换
+  // 这里采用更简单的方案：后端提供 /api/replay/session?file=...
+  // 但为快速落地，先提示用户并给出 fallback
+  addTabMsg(tab, "turn", "⚠️ 回放功能需要先把会话存为 trace。请先运行一次任务，或用 /record 录制后再回放。");
 }
 
 /* ═══════════ 运行 / 停止 ═══════════ */
@@ -2374,6 +2462,70 @@ async function execLine(line) {
     document.getElementById("historyBar").style.display = "none";
     document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
     renderWelcome(tab);
+  } else if (cmd === "/record") {
+    if (!arg) {
+      addTabMsg(tab, "error", "/record 需要提供输出路径，例如: /record D:/replays/demo.jsonl");
+    } else if (tab.running) {
+      addTabMsg(tab, "error", "当前有任务在运行，无法开始录制");
+    } else {
+      const resp = await fetch("/api/record/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: "演示任务", mode: tab.mode || "full" })
+      });
+      const d = await resp.json().catch(() => ({}));
+      if (d.ok) {
+        // 把路径存入 tab，后续 /run 时自动写入
+        tab._recordingPath = arg;
+        addTabMsg(tab, "answer", "✅ 录制已开始 → " + arg + "\n现在运行任务，结束后用 /replay 回放");
+      } else {
+        addTabMsg(tab, "error", "录制启动失败: " + (d.detail || JSON.stringify(d)));
+      }
+    }
+  } else if (cmd === "/replay") {
+    const listResp = await fetch("/api/replays?limit=10");
+    const listData = await listResp.json().catch(() => ({}));
+    const traces = listData.traces || [];
+    let tracePath = arg && arg.trim() ? arg.trim() : null;
+    // 无参 → 选最近一条
+    if (!tracePath) {
+      if (traces.length === 0) {
+        addTabMsg(tab, "error", "没有可回放的 trace 文件——先用 /record 录制一次，或运行任务后手动保存");
+        return;
+      }
+      tracePath = traces[0].path;
+      addTabMsg(tab, "turn", "📜 检测到 " + traces.length + " 条 trace，播放最近一条: " + tracePath);
+    } else {
+      addTabMsg(tab, "turn", "📜 回放: " + tracePath);
+    }
+    // 并行：打开回放 SSE + 显示状态
+    await replayEvents(tracePath, tab);
+  } else if (cmd === "/health") {
+    const s = await (await fetch("/api/status")).json();
+    const cfg = await (await fetch("/api/config")).json();
+    const lines = [
+      "🩺 健康检查",
+      "  模型: " + (cfg.model || "?"),
+      "  API:  " + (cfg.base_url || "未配置"),
+      "  工作区: " + (s.workspace || "?"),
+      "  上下文: " + (cfg.context_window || "?") + " tokens",
+      "  运行中会话: " + (s.runs || []).length,
+    ];
+    // 测 API 延迟
+    const t0 = Date.now();
+    try {
+      const tResp = await fetch(cfg.base_url + "/models", {
+        headers: { "Authorization": "Bearer " + (cfg.api_key_set ? "xxx" : "") }
+      });
+      const dt = Date.now() - t0;
+      lines.push("  API 延迟: " + dt + "ms (" + (tResp.ok ? "✓ 连通" : "✗ 失败") + ")");
+    } catch (e) {
+      lines.push("  API 延迟: 错误 - " + e.message);
+    }
+    lines.push("\n建议：演示前跑 /health，确保 API 延迟 < 500ms");
+    const card = addTabMsg(tab, "answer", "");
+    card.innerHTML = lines.join("<br>");
+    card.style.whiteSpace = "pre-wrap";
   } else {
     addTabMsg(tab, "error", "未知命令: " + cmd + "（/help 查看命令列表）");
   }

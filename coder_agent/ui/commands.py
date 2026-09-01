@@ -26,4 +26,12 @@ COMMANDS: list[dict] = [
     {"name": "/history", "desc": "显示最近一次运行的最近消息", "hasArgs": False},
     {"name": "/trace", "desc": "显示最近一次运行的工具追踪摘要", "hasArgs": False},
     {"name": "/clear", "desc": "清空对话显示", "hasArgs": False},
+    # ── 演示回放模式 ─────────────────────────────────────────────────────
+    {"name": "/record", "desc": "录制本次运行到 trace 文件（用于离线回放）",
+     "hasArgs": True,
+     "argHint": "<输出路径，如 D:/replays/demo.jsonl>"},
+    {"name": "/replay", "desc": "从 trace 文件回放事件流（不依赖 API）",
+     "hasArgs": True,
+     "argHint": "<trace 文件路径，或留空选最近一条>"},
+    {"name": "/health", "desc": "检查 API 连通性与延迟（演示前必跑）", "hasArgs": False},
 ]

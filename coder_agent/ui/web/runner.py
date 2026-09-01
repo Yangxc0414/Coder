@@ -5,6 +5,7 @@
 - 已有的 6 个生命周期钩子作为事件源，转发到线程安全队列
 - 支持多个并行会话：每个 run_id 独立线程/事件队列/agent/journal
 - UI 线程从各自队列消费事件渲染界面；abort 通过 request_abort 标志
+- 演示回放模式：提供 replay_sse() 同步流，按时间戳播放 trace 文件中的事件
 """
 
 from __future__ import annotations
@@ -264,6 +265,17 @@ class RunManager:
             agent.stream_callback = on_stream
             agent.hooks.register("PRE_TOOL_USE", on_toolstart)
 
+            # 演示录制：捕获所有 hook 事件写入 trace 文件
+            _record_path = getattr(self, "_recording_path", None)
+            if _record_path:
+                def _on_event(e):
+                    self.record_event(_record_path, {"kind": e.name, "data": dict(e.data)})
+                for _evt in ["AGENT_STARTED", "AGENT_ENDED", "ASSISTANT_TEXT",
+                             "PRE_TOOL_USE", "POST_TOOL_USE", "TURN_STOPPED",
+                             "VERIFIER_RESULT", "FORMAT_ERROR", "LOOP_DETECTED",
+                             "RECOVERY_EVENT", "LENGTH_RETRY", "BUDGET_EXHAUSTED"]:
+                    agent.hooks.register(_evt, _on_event)
+
             if resume_path:
                 from coder_agent.journal import load_journal, replay_state
                 restored = load_journal(resume_path)
@@ -306,6 +318,11 @@ class RunManager:
                            reads=sorted(getattr(st, "read_files", set()) or set())[-5:],
                            subgoals=len(getattr(st, "completed_subgoals", []) or []),
                            memory_keys=list(getattr(mem, "long_term", {}) or {}),
+                           memory_entries=[
+                               {"k": str(k)[:40],
+                                "v": str(getattr(mem, "long_term", {}).get(k, ""))[:80]}
+                               for k in list(getattr(mem, "long_term", {}) or {})[:5]
+                           ],
                            )
                 # 检测上下文压缩是否发生（三层压缩展示）
                 comp = getattr(getattr(agent, "context", None),
@@ -585,3 +602,133 @@ class RunManager:
                 "when_to_use": str(getattr(d, "when_to_use", "") or "")[:100],
             })
         return {"skills": skills, "mcp": mcp, "subagents": subagents}
+
+    # ── 演示回放模式 ───────────────────────────────────────────────────
+
+    def _replay_session(self, trace_path: Path) -> tuple[str, int]:
+        """从 trace 文件创建临时会话，返回 (run_id, event_count)。"""
+        import json as _json
+        try:
+            raw = trace_path.read_text(encoding="utf-8")
+        except Exception as e:
+            raise ValueError(f"无法读取 trace 文件: {e}")
+
+        events: list[dict] = []
+        meta: dict = {}
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                obj = _json.loads(line)
+            except _json.JSONDecodeError:
+                continue
+            if obj.get("type") == "meta":
+                meta = obj
+                continue
+            if obj.get("type") in ("event", "tool_result"):
+                events.append(obj.get("data") or obj)
+            elif isinstance(obj, dict) and "kind" in obj:
+                events.append(obj)
+
+        if not events:
+            raise ValueError("trace 文件中没有可回放的事件")
+
+        with self._lock:
+            self._seq += 1
+            run_id = f"replay_{self._seq}"
+            session = _RunSession(run_id)
+            self._sessions[run_id] = session
+
+        # 把 replay 事件按时间戳顺序放入队列（模拟真实时序）
+        for ev in events:
+            ts = ev.get("timestamp") or 0
+            ev.setdefault("kind", ev.get("type", "event"))
+            # 过滤掉已废弃的 type 字段，前端按 kind 判断
+            ev.pop("type", None)
+            # 加延迟字段，回放时用 sleep 模拟
+            session.events.put_nowait(ev)
+
+        return run_id, len(events)
+
+    def replay_events(self, trace_path: Path) -> Generator[dict, None, None]:
+        """同步回放 trace 文件中的事件流（用于 /api/replay SSE 端点）。
+
+        每两条事件之间按 timestamp 差值 sleep，模拟真实运行节奏。
+        用于演示：不需要 API，完全离线回放。
+        """
+        import time as _time
+        run_id, n = self._replay_session(trace_path)
+        session = self._sessions[run_id]
+
+        # 先 emit started
+        yield {"kind": "started", "task": "📜 回放模式 — 演示用，不调用 LLM"}
+
+        last_ts = 0.0
+        for i, ev in enumerate(session.events.queue):
+            ts = ev.get("timestamp") or 0
+            if ts > last_ts:
+                _time.sleep(min((ts - last_ts) / 1000.0, 0.5))  # 最多等 0.5s
+            last_ts = ts
+            yield ev
+            # 缓冲输出，避免过快
+            if i % 5 == 4:
+                _time.sleep(0.02)
+
+        # 补齐 done + answer
+        yield {"kind": "done"}
+        yield {"kind": "answer", "answer": "[回放完成] 共 " + str(n) + " 条事件"}
+
+        # 清理
+        with self._lock:
+            self._sessions.pop(run_id, None)
+
+    def record_start(self, task: str, mode: str | None = None) -> str:
+        """开始录制：记录当前配置作为 trace 元数据。
+        返回 trace 路径（创建空文件，待后续 append）。
+        """
+        import datetime as _dt
+        stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        rec_dir = Path.home() / ".coder_replays"
+        rec_dir.mkdir(parents=True, exist_ok=True)
+        path = rec_dir / f"record_{stamp}.jsonl"
+        meta = {
+            "type": "meta",
+            "created": _dt.datetime.now().isoformat(),
+            "task": task[:200],
+            "mode": mode or self.mode,
+            "model": self.model,
+            "workspace": str(self.workspace),
+        }
+        path.write_text(_json.dumps(meta, ensure_ascii=False) + "\n", encoding="utf-8")
+        return str(path)
+
+    def record_event(self, trace_path: str, event: dict) -> None:
+        """追加一条事件到 trace 文件。"""
+        import datetime as _dt
+        p = Path(trace_path)
+        if not p.exists():
+            return
+        ev = dict(event)
+        ev["timestamp"] = int(_dt.datetime.now().timestamp() * 1000)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(ev, ensure_ascii=False) + "\n")
+
+    def recent_replays(self, limit: int = 5) -> list[dict]:
+        """列出最近的回放 trace 文件（供 /replay 无参时选最近一条）。"""
+        rec_dir = Path.home() / ".coder_replays"
+        files = sorted(rec_dir.glob("record_*.jsonl"),
+                       key=lambda f: f.stat().st_mtime, reverse=True)[:limit]
+        out = []
+        for f in files:
+            try:
+                meta = _json.loads(f.read_text(encoding="utf-8").splitlines()[0])
+                ev_count = sum(1 for l in f.read_text(encoding="utf-8").splitlines()
+                               if l.strip() and not l.strip().startswith("#")
+                               and not l.strip().startswith("{"))
+                out.append({"path": str(f), "task": meta.get("task", "?"),
+                            "mode": meta.get("mode", "?"),
+                            "events": ev_count})
+            except Exception:
+                pass
+        return out

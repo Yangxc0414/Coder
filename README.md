@@ -115,6 +115,23 @@ interrupted *recovery* can itself be recovered.
 | `dry-run` | Writes are simulated and reported, nothing touches disk |
 | `full` | Relaxed policy denials (path safety still enforced) |
 
+### Demo replay mode — deterministic presentations without API
+
+录制的 SSE 事件序列存入 `~/.coder_replays/`，回放时完全离线、不依赖 LLM API。
+前端输入框输入命令即可使用：
+
+```
+/record D:/replays/demo.jsonl    # 录制本次运行
+<运行任务...>
+/replay                          # 回放最近一条 trace（无需 API）
+/replay D:/replays/demo.jsonl    # 回放指定 trace
+/health                          # 演示前检查 API 连通性与延迟
+```
+
+回放的时序与真实运行一致（按时间戳 sleep），前端 UI 零改动，所有 12 个
+hook 事件（AgentStarted / ToolStart / Tool / VerifierResult / Turn / Compress 等）
+都会正常渲染。答辩口径："回放用的就是 SessionJournal 机制本身"。
+
 ## Design principles
 
 - **模型负责决策，程序负责约束** — the model decides *what* to do; PolicyGate,

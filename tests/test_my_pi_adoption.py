@@ -41,8 +41,9 @@ class TestTaskTool:
         agent = self._agent_with_tools(tmp_path, LLMClient(model="mock"))
         assert "task" in agent.registry.list_names()
 
-    def test_total_tools_now_17(self, tmp_path: Path):
-        """15 (5 core + 5 mcp + 5 skill) + task + memory."""
+    def test_total_tools_now_29(self, tmp_path: Path):
+        """29 tools: 5 core + 5 mcp + 17 skill + task + memory.
+        (Was 17 when only 5 skills were registered; now 17 built-in skills.)"""
         from coder_agent.tools.registry import create_default_registry
 
         agent = Agent(
@@ -50,7 +51,21 @@ class TestTaskTool:
             registry=create_default_registry(tmp_path, AgentMode.GOAL),
             workspace=tmp_path, mode=AgentMode.GOAL,
         )
-        assert len(agent.registry.list_names()) == 17
+        names = agent.registry.list_names()
+        # 核心 5
+        for n in ("read_file", "write_file", "list_files", "search_text", "run_command"):
+            assert n in names, f"核心工具缺失: {n}"
+        # MCP 5
+        for n in ("mcp_git_git_diff", "mcp_git_git_log", "mcp_git_git_status",
+                  "mcp_system_system_info", "mcp_debug_read_trace"):
+            assert n in names, f"MCP 工具缺失: {n}"
+        # Skill 17
+        skill_names = [n for n in names if n.startswith("skill_")]
+        assert len(skill_names) == 17, f"Skill 数量不符: {len(skill_names)}"
+        # task + memory
+        assert "task" in names
+        assert "memory" in names
+        assert len(names) == 29, f"总数不符: {len(names)} (期望 29)"
 
     def test_delegation_via_tool(self, tmp_path: Path):
         """Model calls task → SubagentRunner runs the child → report returned."""
