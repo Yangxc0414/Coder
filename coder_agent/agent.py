@@ -126,7 +126,7 @@ class Agent:
         self.stream_callback = stream_callback  # 逐 token 回调（UI 流式展示）
         self._tokens_used = 0
         self._budget_notice_given = False
-        self._llm_max_tokens = 4096
+        self._llm_max_tokens = 32768
         self._length_escalated = False
         self.inspector = ContextInspector()
         self.messages: list[dict] = []
@@ -240,7 +240,7 @@ class Agent:
         self._tokens_used = 0
         self._budget_notice_given = False
         self._length_escalated = False
-        self._llm_max_tokens = 4096
+        self._llm_max_tokens = 32768
         self._cmd_fail_streak = 0
         self._cmd_hint_injected = False
         # 0, not None: a failed check with zero mutations means the failure

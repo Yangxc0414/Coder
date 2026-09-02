@@ -49,6 +49,11 @@
   .session-item .session-del { display: none; position: absolute; top: 6px; right: 6px; background: none; border: none; color: var(--faint); cursor: pointer; font-size: 12px; padding: 2px 4px; }
   .session-item:hover .session-del { display: block; }
   .session-item .session-del:hover { color: var(--err); }
+  /* 项目分组折叠样式 */
+  .proj-group-header:hover { color: var(--text); }
+  .proj-arrow { display: inline-block; transition: transform .15s; font-size: 9px; }
+  .proj-group.collapsed .proj-arrow { transform: rotate(-90deg); }
+  .proj-group-sessions { transition: none; }
   .refresh-btn { width: 100%; padding: 8px; font-size: 11px; background: transparent; border: 1px dashed var(--border2); border-radius: 6px; color: var(--faint); cursor: pointer; margin-top: 8px; transition: all .15s; }
   .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
   .file-item { padding: 6px 10px; font-size: 11px; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; color: var(--muted); cursor: pointer; margin-bottom: 2px; transition: all .15s; }
@@ -548,9 +553,8 @@ function switchTab(id) {
     t.btn.classList.toggle("active", t.id === id);
   });
   Tabs.active = tab;
-  // 会话级模式：select 跟随当前 tab（组件化 per-tab）
-  document.getElementById("mode").value = tab.mode || "full";
-  updateModeChips();
+  // 会话级模式：select / chips / footer 跟随当前 tab（组件化 per-tab）
+  syncModeUI(tab);
   // 同步运行状态 UI
   document.getElementById("state").textContent = tab.running ? "运行中…" : "空闲";
   document.getElementById("statusDot").className = "status-dot" + (tab.running ? " running" : "");
@@ -724,25 +728,27 @@ function bindModeChips(scope) {
       const mode = ch.dataset.mode;
       const t = activeTab();
       if (t) t.mode = mode;  // 会话级模式
-      document.getElementById("mode").value = mode;
-      updateModeChips();
+      syncModeUI(t);
       const desc = (MODES.find(m => m.name === mode) || {}).desc || "执行模式";
       if (t) addTabMsg(t, "turn", "⚙ 模式已切换: " + mode + "（" + desc + "）");
     };
   });
-  updateModeChips();
-  // header select 手动切换时同步当前 tab 模式 + chips 高亮
+  syncModeUI(activeTab());
+  // header select 手动切换时同步当前 tab 模式 + chips 高亮 + footer
   document.getElementById("mode").onchange = () => {
     const t = activeTab();
     if (t) t.mode = document.getElementById("mode").value;
-    updateModeChips();
+    syncModeUI(t);
   };
 }
 
-function updateModeChips() {
-  const cur = document.getElementById("mode").value;
+// 统一同步模式 UI：header select 值 + 欢迎页 chips 高亮 + footer mode 显示
+function syncModeUI(tab) {
+  const mode = (tab && tab.mode) || document.getElementById("mode").value || "full";
+  document.getElementById("mode").value = mode;
+  document.getElementById("f-mode").textContent = mode;
   document.querySelectorAll("#modeChips .chip").forEach(ch => {
-    ch.style.cssText = ch.dataset.mode === cur
+    ch.style.cssText = ch.dataset.mode === mode
       ? "border-color:var(--accent);color:var(--accent);background:var(--user-bg);"
       : "";
   });
@@ -824,7 +830,8 @@ function beginTurn(tab, step) {
   det.open = true;
   det.innerHTML = "<summary><span class='turn-badge'>Turn " + step + "</span>" +
     "<span class='turn-count'>0 步</span></summary><div class='turn-body'></div>";
-  if (tab.turnEl) tab.turnEl.open = false;
+  // 不折叠旧的 turn，让所有 turn 都保持展开
+  // if (tab.turnEl) tab.turnEl.open = false;  // 注释掉这行
   tab.feedEl.appendChild(det);
   tab.turnEl = det;
   tab.turnStep = step;
@@ -1065,6 +1072,16 @@ function onEvent(ev, tab) {
       if (badge) badge.textContent = "Turn " + ev.step;
     } else if (ev.step !== tab.turnStep) {
       beginTurn(tab, ev.step);  // 新的一步 → 新容器
+      // 新 turn 创建后立即展开并滚动
+      if (tab.turnEl) {
+        tab.turnEl.open = true;
+        scrollFeedEl(tab.feedEl, true);
+      }
+    } else {
+      // 同一步骤：确保当前 turn 保持展开
+      if (tab.turnEl) {
+        tab.turnEl.open = true;
+      }
     }
     tab.stats.tokens = ev.tokens || 0;
     tab.stats.steps = ev.step;
@@ -1317,20 +1334,39 @@ function handleSubmit() {
 
 /* ═══════════ 历史会话（作用于当前 tab） ═══════════ */
 async function openSession(file) {
+  console.log('[openSession] 收到 file:', file);
   let tab = activeTab();
-  if (!tab) return;
+  if (!tab) {
+    console.warn('[openSession] 没有活动 tab，尝试创建');
+    tab = createTab();
+  }
+  if (!tab) {
+    console.error('[openSession] 无法创建 tab');
+    return;
+  }
   if (tab.running) {
     // 当前会话正在运行：自动新建 tab 打开历史，不打断运行中的任务
-    tab = createTab();
-    addTabMsg(tab, "turn", "当前会话正在运行——已在新会话中打开历史");
+    const newTab = createTab();
+    addTabMsg(newTab, "turn", "当前会话正在运行——已在新会话中打开历史");
+    // 在新 tab 中加载
+    setTimeout(() => openSession(file), 100);
+    return;
   }
   // 立即清空并显示加载中（避免上一个会话内容残留）
   tab.feedEl.innerHTML = '<div style="color:var(--faint);font-size:12px;padding:20px;text-align:center;">加载会话中…</div>';
   tab.turnEl = null; tab.turnStep = null; tab.streamEl = null; tab.pendingEl = null;
   tab.stateInfo = null;
-  const resp = await fetch("/api/session?file=" + encodeURIComponent(file));
+
+  console.log('[openSession] 请求路径:', file);
+  const encodedPath = encodeURIComponent(file);
+  console.log('[openSession] 编码后:', encodedPath);
+
+  const resp = await fetch("/api/session?file=" + encodedPath);
+  console.log('[openSession] 响应状态:', resp.status);
+
   if (!resp.ok) {
     const e = await resp.json().catch(() => ({}));
+    console.error('[openSession] 加载失败:', e);
     tab.feedEl.innerHTML = '<div style="color:var(--err);font-size:12px;padding:20px;text-align:center;">' +
       escHtml(e.detail || "加载会话失败") + '</div>';
     return;
@@ -1512,7 +1548,9 @@ document.getElementById("goalBadge").addEventListener("click", () => {
 });
 function sessionProject(ws) {
   if (!ws) return "未分类";
-  const parts = ws.replace(/[\\/]+$/, "").split(/[\\/]/);
+  // 兼容 Windows (C:\path) 和 Unix (/path) 路径
+  const normalized = ws.replace(/\\/g, '/');
+  const parts = normalized.split('/').filter(Boolean);
   return parts[parts.length - 1] || ws;
 }
 async function loadSessions() {
@@ -1540,10 +1578,28 @@ async function loadSessions() {
     return 0;
   });
   projOrder.forEach(proj => {
+    // 分组容器（默认折叠）
+    const groupDiv = document.createElement("div");
+    groupDiv.className = "proj-group collapsed";
+    groupDiv.dataset.proj = proj;
+
+    // 分组标题栏（可点击折叠）
     const gh = document.createElement("div");
-    gh.style.cssText = "font-size:11px;color:var(--accent);margin:10px 2px 4px;font-weight:600;";
-    gh.textContent = "📁 " + proj + (proj === curProj ? "（当前）" : "") + " · " + groups[proj].length + " 个会话";
-    box.appendChild(gh);
+    gh.className = "proj-group-header";
+    gh.style.cssText = "display:flex;align-items:center;gap:4px;font-size:11px;color:var(--accent);margin:10px 2px 4px;font-weight:600;cursor:pointer;user-select:none;";
+    gh.innerHTML = '<span class="proj-arrow">▶</span><span style="flex:1;">📁 ' + escHtml(proj) + (proj === curProj ? "（当前）" : "") + ' · ' + groups[proj].length + ' 个会话</span>';
+
+    // 会话列表容器（默认隐藏）
+    const sessionList = document.createElement("div");
+    sessionList.className = "proj-group-sessions";
+    sessionList.style.cssText = "margin-left:12px;display:none;";
+
+    gh.onclick = () => {
+      const isCollapsed = groupDiv.classList.toggle("collapsed");
+      gh.querySelector(".proj-arrow").textContent = isCollapsed ? "▶" : "▼";
+      sessionList.style.display = isCollapsed ? "none" : "block";
+    };
+
     groups[proj].forEach(s => {
       const div = document.createElement("div");
       div.className = "session-item";
@@ -1565,8 +1621,12 @@ async function loadSessions() {
         }
       };
       div.onclick = () => openSession(s.file);
-      box.appendChild(div);
+      sessionList.appendChild(div);
     });
+
+    groupDiv.appendChild(gh);
+    groupDiv.appendChild(sessionList);
+    box.appendChild(groupDiv);
   });
 }
 
@@ -2342,8 +2402,7 @@ async function execLine(line) {
   } else if (cmd === "/mode") {
     if (["full", "plan", "dry-run"].includes(arg)) {
       tab.mode = arg;  // 会话级模式
-      document.getElementById("mode").value = arg;
-      updateModeChips();
+      syncModeUI(tab);
       addTabMsg(tab, "answer", "模式已切换: " + arg + "（仅当前会话）");
     } else addTabMsg(tab, "answer", "当前模式: " + (tab.mode || document.getElementById("mode").value) +
       "（用法: /mode full|plan|dry-run；设置目标请用 /goal <描述>）");
@@ -2603,16 +2662,34 @@ function renderActivity() {
       (si2.subgoals ? "✅ 完成子目标: " + si2.subgoals + " 个<br>" : "") +
       "</div></div>";
   }
-  // Memory 记忆（框架 Memory.long_term 键值对）
+  // Memory 分层记忆（短期 = 自动记录的工具流；长期 = 模型主动写入的键值对）
   if (tab && tab.stateInfo &&
-      ((tab.stateInfo.memory_entries || []).length || (tab.stateInfo.memory_keys || []).length)) {
+      ((tab.stateInfo.memory_recent || []).length ||
+       (tab.stateInfo.memory_entries || []).length)) {
+    const recent = tab.stateInfo.memory_recent || [];
     const entries = tab.stateInfo.memory_entries || [];
-    html += "<div class='act-section'><div class='as-title'>🧠 记忆（Memory）</div>" +
-      "<div class='act-goal'>" + (entries.length
-        ? entries.map(e => "<b style='color:var(--accent);'>" + escHtml(e.k) +
+    const keys = tab.stateInfo.memory_keys || [];
+    // 两层都空时才不显示；有一层即可显示区块，另一层给占位说明
+    html += "<div class='act-section'><div class='as-title'>🧠 记忆（分层）</div>";
+
+    // 短期记忆层：自动记录的工具动作流
+    html += "<div class='act-goal' style='margin-bottom:6px;'>" +
+      "<b style='color:var(--accent2);'>① 短期记忆</b> <span style='font-size:10px;color:var(--faint);'>— 自动记录（每步工具调用，滚动保留最近 6 条）</span><br>" +
+      (recent.length
+        ? recent.map(r => "  <span style='color:var(--faint);'>Step " + r.step + "</span> " +
+            (r.ok ? "✅" : "❌") + " " + escHtml(r.tool) +
+            (r.args ? " <span style='color:var(--muted);'>→ " + escHtml(r.args) + "</span>" : "")).join("<br>")
+        : "  <span style='color:var(--faint);'>（尚无工具动作）</span>") +
+      "</div>";
+
+    // 长期记忆层：模型主动写入的键值对
+    html += "<div class='act-goal' style='border-top:1px dashed var(--border);padding-top:6px;'>" +
+      "<b style='color:var(--ok);'>② 长期记忆</b> <span style='font-size:10px;color:var(--faint);'>— 模型主动写入（persist 到 .coder_memory.md，跨会话保留）</span><br>" +
+      (entries.length
+        ? entries.map(e => "  <b style='color:var(--accent);'>" + escHtml(e.k) +
             "</b>: " + escHtml(e.v)).join("<br>")
-        : (tab.stateInfo.memory_keys || []).map(k =>
-            "<b style='color:var(--accent);'>" + escHtml(k) + "</b>").join(" · ")) +
+        : "  <span style='color:var(--faint);'>（空 — 模型可用 memory 工具写入长期事实）</span>") +
+      (keys.length > entries.length ? "  <br><span style='color:var(--faint);'>… 共 " + keys.length + " 条</span>" : "") +
       "</div></div>";
   }
   html += "<div class='act-section'><div class='as-title'>当前配置</div>" +

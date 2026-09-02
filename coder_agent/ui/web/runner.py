@@ -323,6 +323,14 @@ class RunManager:
                                 "v": str(getattr(mem, "long_term", {}).get(k, ""))[:80]}
                                for k in list(getattr(mem, "long_term", {}) or {})[:5]
                            ],
+                           # 短期记忆：最近工具动作（自动记录，滚动窗口）
+                           memory_recent=[
+                               {"step": getattr(en, "step", 0),
+                                "tool": getattr(en, "tool", "?"),
+                                "args": str(getattr(en, "args_summary", ""))[:60],
+                                "ok": bool(getattr(en, "success", False))}
+                               for en in list(getattr(mem, "short_term", []) or [])[-6:]
+                           ],
                            )
                 # 检测上下文压缩是否发生（三层压缩展示）
                 comp = getattr(getattr(agent, "context", None),
