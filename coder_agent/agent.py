@@ -24,6 +24,7 @@ from .extensions.base import SubagentRunner
 from .journal import SessionJournal
 from .planner import Planner
 from .tool_fallback import ToolFallbackRouter
+from .tool_routing import route_tools
 
 try:
     from .verifier_llm import ProgressTracker, select as llm_select
@@ -673,9 +674,23 @@ class Agent:
 
     def _query_llm(self) -> LLMResponse:
         # Build context-bounded message list with dynamic state/memory injection
+        all_tool_defs = self.registry.list_tools()
+        # 自适应工具路由（Enhancement 6）：按任务阶段裁剪 schema——
+        # 市面 agent 每轮全量注入 29 个工具定义（≈5-7K tokens/轮白付），
+        # 这里只注入 核心7 + 近期活跃 + 阶段相关 的集合。保底不变量：
+        # 核心工具永不被裁；任何异常回退全量（零降智）。
+        recent_calls = [
+            a[0] for a in list(self.state.recent_actions)[-8:]
+        ]
+        routed_tools, phase = route_tools(all_tool_defs, recent_calls)
+        if len(routed_tools) < len(all_tool_defs):
+            self.trace.record(
+                self._n_steps, "tool_schema_routed",
+                phase=phase, before=len(all_tool_defs), after=len(routed_tools),
+            )
         messages_for_api = self.context.build_messages(
             _build_system_prompt(
-                self.registry.list_tools(), str(self.workspace),
+                routed_tools, str(self.workspace),
                 state=self.state, memory=self.memory,
             ),
             self.messages,
@@ -683,7 +698,7 @@ class Agent:
 
         response = self.llm.chat(
             messages=messages_for_api,
-            tools=self.registry.list_tools(),
+            tools=routed_tools,
             max_tokens=self._llm_max_tokens,
             **(self._stream_kwargs()),
         )
