@@ -896,8 +896,6 @@ function renderFrameworkEvent(tab, ev) {
 function appendToolToTurn(tab, ev) {
   if (!tab.turnEl) beginTurn(tab, ev.step || 1);
   const body = tab.turnEl.querySelector(".turn-body");
-  const det = document.createElement("details");
-  det.className = "tool-details";
   // PolicyGate 拦截识别：框架产生的错误以 "Policy denied:" 开头
   const isPolicy = ev.detail && ev.detail.startsWith("Policy denied");
   const mark = isPolicy ? '<span class="fail">🚦</span>'
@@ -906,14 +904,35 @@ function appendToolToTurn(tab, ev) {
   // 子代理委托：报告单独标注
   const isSubagent = ev.tool === "task";
   const bodyLabel = isSubagent ? "<span class='res-label'>🧩 子代理报告</span>\n" : "";
+  const det = document.createElement("details");
+  det.className = "tool-details";
   det.innerHTML = "<summary>" + mark +
     " <span class='tool-name'>" + escHtml(ev.tool) + "</span>" +
     toolBadge(ev.tool) + label +
     (ev.target ? " <span class='tool-target'>→ " + escHtml(ev.target) + "</span>" : "") +
-    "</summary><div class='body'>" +
-    (ev.detail ? "<span class='err-label'>" + (isPolicy ? "policy" : "error") + "</span>\n" + escHtml(ev.detail) + "\n" : "") +
-    bodyLabel +
-    (ev.preview || "(无输出)") + "</div>";
+    "</summary><div class='body'></div>";
+  const bd = det.querySelector(".body");
+  // 参数/错误区（后端截断 + 前端转义，防注入）
+  if (ev.detail) {
+    const dl = document.createElement("div");
+    dl.className = "err-label";
+    dl.textContent = isPolicy ? "policy" : "error";
+    bd.appendChild(dl);
+    bd.appendChild(document.createTextNode(ev.detail));
+    bd.appendChild(document.createTextNode("\n"));
+  }
+  if (bodyLabel) {
+    const bl = document.createElement("div");
+    bl.className = "res-label";
+    bl.textContent = "🧩 子代理报告";
+    bd.appendChild(bl);
+    bd.appendChild(document.createTextNode("\n"));
+  }
+  // 输出预览区：ev.preview 是文件读回/命令输出的前 600 字符，必须转义
+  const pv = document.createElement("div");
+  pv.className = "tool-preview";
+  pv.textContent = ev.preview || "(无输出)";
+  bd.appendChild(pv);
   body.appendChild(det);
   // turn 摘要行显示动作进展（不展开也能看到每步做了什么）
   const n = body.querySelectorAll("details.tool-details").length;
@@ -2599,6 +2618,11 @@ function renderActivity() {
         "<div class='tbar'><i style='width:" + Math.round(cnt / maxCnt * 100) + "%'></i></div>" +
         "<span class='tcnt'>" + cnt + "</span></div>";
     });
+    if (toolEntries.length > 8) {
+      html += "<div style='font-size:10px;color:var(--faint);padding:2px 0;'>… 还有 " +
+        (toolEntries.length - 8) + " 个工具未展示（" +
+        escHtml(toolEntries.slice(8).map(e => e[0] + " ×" + e[1]).join("、")) + "）</div>";
+    }
     html += "</div>";
   }
   if (st.writes.length || st.reads.length) {

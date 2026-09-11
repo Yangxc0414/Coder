@@ -584,6 +584,10 @@ async def api_replay(trace: str):
         except Exception as e:
             # 把异常转为前端可消费的 error 事件，避免 StreamingResponse 崩溃
             yield f"data: {_json.dumps({'kind': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n"
+        finally:
+            # 补发 done，与实时 SSE 语义一致：前端靠 done 收尾
+            # （复位运行态、清理 pending、显示"运行完成"）
+            yield f"data: {_json.dumps({'kind': 'done'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
