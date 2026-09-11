@@ -11,7 +11,14 @@ encoder degrades badly on this machine (measured: 20K chars ≈ 0.6s,
 
 from __future__ import annotations
 
-import tiktoken
+import logging
+
+logger = logging.getLogger(__name__)
+
+try:
+    import tiktoken
+except ImportError:  # pragma: no cover
+    tiktoken = None
 
 
 # Mapping from model name patterns to tiktoken encodings.
@@ -29,21 +36,42 @@ _MODEL_ENCODINGS: dict[str, str] = {
 _LARGE_TEXT_CHARS = 20_000
 
 # Encoding cache — one lookup per model per process.
-_ENCODING_CACHE: dict[str, tiktoken.Encoding] = {}
+_ENCODING_CACHE: dict[str, "tiktoken.Encoding"] = {}
+# 失败降级缓存：避免每次调用都重试网络（断网环境下 tiktoken 首次加载 BPE 会失败）
+_FALLBACK_ACTIVE: dict[str, bool] = {}
 
 
-def _encoding_for_model(model: str) -> tiktoken.Encoding:
-    """Get the tiktoken encoding for a model name (cached)."""
+def _heuristic_tokens(text: str) -> int:
+    """~4 chars/token 估算（代码密集内容偏保守，预算场景可接受）。"""
+    return len(text) // 4 if text else 0
+
+
+def _encoding_for_model(model: str) -> "tiktoken.Encoding | None":
+    """Get the tiktoken encoding for a model name (cached).
+
+    Returns None when tiktoken is unavailable or the BPE download failed
+    (offline environments) — callers then use the char heuristic.
+    """
+    if tiktoken is None:
+        return None
     cached = _ENCODING_CACHE.get(model)
     if cached is not None:
         return cached
+    if _FALLBACK_ACTIVE.get(model):
+        return None
     model_lower = model.lower()
     enc_name = "cl100k_base"
     for pattern, name in _MODEL_ENCODINGS.items():
         if pattern in model_lower:
             enc_name = name
             break
-    enc = tiktoken.get_encoding(enc_name)
+    try:
+        enc = tiktoken.get_encoding(enc_name)
+    except Exception as e:
+        logger.debug("tiktoken unavailable for %s (%s); using char heuristic",
+                     model, type(e).__name__)
+        _FALLBACK_ACTIVE[model] = True
+        return None
     _ENCODING_CACHE[model] = enc
     return enc
 
@@ -54,6 +82,8 @@ def count_tokens(text: str, model: str = "gpt-4o") -> int:
         # ~4 chars per token is a safe over/under-estimate for budgeting
         return len(text) // 4
     enc = _encoding_for_model(model)
+    if enc is None:
+        return _heuristic_tokens(text)
     return len(enc.encode(text))
 
 

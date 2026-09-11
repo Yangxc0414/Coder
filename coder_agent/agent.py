@@ -34,6 +34,10 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 MAX_STEPS = 50
+# LLM 单轮输出预算默认值。DeepSeek 等推理模型在低预算（4096）下思考链会被截断
+# （finish_reason=length），加倍重试到 8192 仍不够——直接默认给满 32K。
+# 旧值 4096 保留给测试：Agent(llm_max_tokens=4096) 可复现 length 升级路径。
+DEFAULT_LLM_MAX_TOKENS = 32768
 MAX_CONSECUTIVE_FORMAT_ERRORS = 3
 
 SYSTEM_PROMPT = """You are a programming assistant agent. Your job is to complete programming tasks by reading files, writing code, and running commands.
@@ -105,6 +109,7 @@ class Agent:
         journal: "SessionJournal | None" = None,
         token_budget: int | None = None,
         stream_callback: Any = None,
+        llm_max_tokens: int | None = None,
     ) -> None:
         self.llm = llm_client
         self.registry = registry
@@ -126,7 +131,9 @@ class Agent:
         self.stream_callback = stream_callback  # 逐 token 回调（UI 流式展示）
         self._tokens_used = 0
         self._budget_notice_given = False
-        self._llm_max_tokens = 32768
+        self._llm_max_tokens = llm_max_tokens or DEFAULT_LLM_MAX_TOKENS
+        # run() 重置升级状态时恢复到基准预算（保留构造时显式指定的值）
+        self._llm_max_tokens_base = self._llm_max_tokens
         self._length_escalated = False
         self.inspector = ContextInspector()
         self.messages: list[dict] = []
@@ -240,7 +247,7 @@ class Agent:
         self._tokens_used = 0
         self._budget_notice_given = False
         self._length_escalated = False
-        self._llm_max_tokens = 32768
+        self._llm_max_tokens = self._llm_max_tokens_base
         self._cmd_fail_streak = 0
         self._cmd_hint_injected = False
         # 0, not None: a failed check with zero mutations means the failure

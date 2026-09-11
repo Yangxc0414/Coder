@@ -1,7 +1,12 @@
 """finish_reason=length recovery tests (improvement F from
 doc/deep_comparison.md, sourced from OneCode loop.py:586-615:
 a response cut off by max_tokens mid-answer is retried once with a
-doubled budget instead of surfacing as a parse error)."""
+doubled budget instead of surfacing as a parse error).
+
+Note: production default budget is 32K (DeepSeek-class reasoning models
+truncate their thinking at 4096). These tests pin an explicit 4096
+baseline via Agent(llm_max_tokens=4096) to exercise the escalation path
+deterministically."""
 
 from __future__ import annotations
 
@@ -44,7 +49,7 @@ class TestLengthEscalation:
         llm = TruncatingLLM()
         agent = Agent(
             llm_client=llm, registry=ToolRegistry(), workspace=tmp_path,
-            mode=AgentMode.GOAL,
+            mode=AgentMode.GOAL, llm_max_tokens=4096,
         )
         answer = agent.run("task")
         assert answer == "full complete answer"
@@ -62,7 +67,7 @@ class TestLengthEscalation:
         llm = AlwaysTruncated()
         agent = Agent(
             llm_client=llm, registry=ToolRegistry(), workspace=tmp_path,
-            mode=AgentMode.GOAL,
+            mode=AgentMode.GOAL, llm_max_tokens=4096,
         )
         answer = agent.run("task")
         # exactly one escalation: [4096, 8192] — the second truncation is
@@ -94,7 +99,7 @@ class TestLengthEscalation:
         registry.register(ListFilesTool(tmp_path))
         agent = Agent(
             llm_client=llm, registry=registry, workspace=tmp_path,
-            mode=AgentMode.GOAL, max_steps=1,
+            mode=AgentMode.GOAL, max_steps=1, llm_max_tokens=4096,
         )
         agent.run("task")
         # tool_calls with finish_reason=length are parsed, not escalated —
@@ -105,7 +110,7 @@ class TestLengthEscalation:
         llm = TruncatingLLM()
         agent = Agent(
             llm_client=llm, registry=ToolRegistry(), workspace=tmp_path,
-            mode=AgentMode.GOAL,
+            mode=AgentMode.GOAL, llm_max_tokens=4096,
         )
         agent.run("first")
         agent.run("second")
