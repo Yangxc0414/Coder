@@ -26,10 +26,12 @@ https://gitee.com/doraemon0414/coder-agent
    · 工具与安全：29 个工具（5 核心+5 MCP+17 Skill+task 委派+memory）、
      PolicyGate 三级安全（危险命令黑名单/路径逃逸校验/环境变量过滤）、
      parser 五层验证、工具失败自动降级路由（同类失败连败 2 次注入换方法建议）、
+     自适应工具 schema 路由（按任务阶段裁剪 29→~12 工具定义省 token）、
      task 工具委派 4 类子代理（结构化反递归）
    · 规划与编排：Plan-Execute-Verify 三段式——LLM 把复杂任务分解为
      原子子目标依赖图，无依赖子目标线程池并行派发子代理执行，每层
-     验证门控；全部失败自动回退 ReAct（零降智）
+     验证门控；成功计划沉淀为模板库（plan_templates.json，跨会话
+     复用免 LLM 分解调用）；全部失败自动回退 ReAct（零降智）
    · 评估与恢复：独立 Verifier（pytest/语法/git 三重检查+基线对比
      +变更门控）、失败模式库（失败指纹化+按类别轮换修复策略+跨会话
      知识沉淀，.coder_failure_patterns.json）、三道终止闸（步数收尾轮/
@@ -37,7 +39,7 @@ https://gitee.com/doraemon0414/coder-agent
 3. 会话恢复：每次运行镜像 journal，/resume 断点续跑，链式可恢复
 4. 演示回放：/record 录制运行 trace，/replay 离线回放（不依赖 API，
    用于演示环境兜底）；/health 后端侧 API 连通性检查
-5. 测试：python -m pytest tests/（374 例，无需 API key）
+5. 测试：python -m pytest tests/（390 例，无需 API key）
 6. 基准对照：python -m tests.benchmark_agent
    coder_agent 全增强版 vs 纯 ReAct 基线（市面开源 agent 范式）的量化对照——
    同一任务/同一确定性 LLM/同一工具环境，差异全部来自框架机制

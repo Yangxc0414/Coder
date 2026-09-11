@@ -140,8 +140,12 @@ class Agent:
         self._llm_max_tokens_base = self._llm_max_tokens
         # Plan-Execute-Verify 编排器：复杂任务自动分解 + 子代理并行执行。
         # 失败一律回退 ReAct（零降智原则）。显式 use_planner=False 可关闭。
+        # workspace 传入让 Planner 启用跨会话计划模板学习（Enhancement 7）
         self._use_planner = bool(use_planner)
-        self._planner: Planner | None = Planner(llm_client=llm_client) if self._use_planner else None
+        self._planner: Planner | None = (
+            Planner(llm_client=llm_client, workspace=self.workspace)
+            if self._use_planner else None
+        )
         self._length_escalated = False
         self.inspector = ContextInspector()
         self.messages: list[dict] = []
@@ -648,6 +652,14 @@ class Agent:
                 summary_lines.append(f"\n【子目标 #{o.subgoal.index + 1}】{o.subgoal.goal}\n{body}")
             self.trace.record(self._n_steps, "plan_completed",
                              subgoals=len(outcomes), all_passed=all_passed)
+            # 跨会话学习（Enhancement 7）：成功计划存入模板库，
+            # 同类任务下次直接复用（免 LLM 分解调用）
+            if self._planner is not None:
+                try:
+                    self._planner.remember_plan(task, plan, succeeded=True,
+                                                workspace=self.workspace)
+                except Exception as e:
+                    logger.debug("plan template remember failed: %s", e)
             self._append_message({"role": "assistant",
                                  "content": "\n".join(summary_lines).strip()})
             return "\n".join(summary_lines).strip()

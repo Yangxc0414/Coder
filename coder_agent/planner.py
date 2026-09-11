@@ -80,14 +80,122 @@ class PlanResult:
 
 
 class Planner:
-    """LLM 任务分解器。"""
+    """LLM 任务分解器（带跨会话计划模板学习，Enhancement 7）。
 
-    def __init__(self, llm_client, timeout: int = 30) -> None:
+    计划模板库：每次成功的规划把 (任务签名 → 子目标结构) 存到
+    工作区的 plan_templates.json。下次遇到**同类任务**（签名匹配）
+    时跳过 LLM 分解调用，直接复用历史验证有效的计划结构——
+    既省一次 LLM 调用的钱，又保证"同类任务用同一种已被证明
+    有效的分解方式"，把规划知识沉淀为可复用资产
+    （市面 agent 每次规划都从零开始问 LLM，无跨任务学习）。
+    """
+
+    TEMPLATE_STORE = "plan_templates.json"
+    MAX_TEMPLATES = 50
+
+    def __init__(self, llm_client, timeout: int = 30,
+                 workspace=None) -> None:
         self._llm = llm_client
         self._timeout = timeout
+        self._templates: dict[str, dict] = {}
+        if workspace is not None:
+            self._load_templates(workspace)
+
+    # ── 计划模板库（跨会话学习）──
+    def _template_path(self, workspace) -> "Path | None":
+        from pathlib import Path
+        return Path(workspace) / self.TEMPLATE_STORE
+
+    def _load_templates(self, workspace) -> int:
+        p = self._template_path(workspace)
+        if p is None or not p.exists():
+            return 0
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            raw = data.get("templates", {})
+            if isinstance(raw, list):
+                self._templates = dict(raw)
+            else:
+                self._templates = raw
+        except (json.JSONDecodeError, OSError) as e:
+            logger.debug("plan template load failed: %s", e)
+            self._templates = {}
+        return len(self._templates)
+
+    def _save_templates(self, workspace) -> None:
+        p = self._template_path(workspace)
+        if p is None:
+            return
+        try:
+            payload = {"templates": list(self._templates.items())[-self.MAX_TEMPLATES:]}
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(p)
+        except OSError as e:
+            logger.debug("plan template save failed: %s", e)
+
+    @staticmethod
+    def _task_signature(task: str) -> str:
+        """任务签名：归一化（小写/去空白）后取哈希——同类任务得到
+        同一签名，用于模板匹配。"""
+        import hashlib
+        norm = re.sub(r"\s+", " ", task.strip().lower())
+        return hashlib.sha1(norm.encode("utf-8")).hexdigest()[:12]
+
+    def remember_plan(self, task: str, plan: PlanResult,
+                      succeeded: bool, workspace=None) -> None:
+        """规划成功后存入模板库（只存成功验证过的——失败计划不沉淀）。"""
+        if workspace is None or not succeeded:
+            return
+        sig = self._task_signature(task)
+        self._templates[sig] = {
+            "task_norm": task.strip()[:100],
+            "subgoals": [
+                {"index": sg.index, "goal": sg.goal[:200],
+                 "subagent_type": sg.subagent_type,
+                 "depends_on": sg.depends_on}
+                for sg in plan.subgoals
+            ],
+            "succeeded": True,
+        }
+        self._save_templates(workspace)
+
+    def recall_template(self, task: str) -> PlanResult | None:
+        """查历史成功计划；命中且结构完整时直接复用（免 LLM 调用）。"""
+        sig = self._task_signature(task)
+        t = self._templates.get(sig)
+        if not t:
+            return None
+        goals = [
+            Subgoal(
+                index=int(g.get("index", i)),
+                goal=str(g.get("goal", "")).strip(),
+                subagent_type=str(g.get("subagent_type") or "researcher"),
+                depends_on=[int(d) for d in (g.get("depends_on") or [])],
+            )
+            for i, g in enumerate(t.get("subgoals", []))
+        ]
+        if len(goals) < MIN_SUBGOALS:
+            return None
+        valid = {g.index for g in goals}
+        for g in goals:
+            g.depends_on = [d for d in g.depends_on if d in valid and d != g.index]
+        layers = self._topological_layers(goals)
+        if layers is None:
+            return None
+        return PlanResult(subgoals=goals, layers=layers)
 
     def plan(self, task: str, max_subgoals: int = MAX_SUBGOALS) -> PlanResult | None:
-        """分解任务。任何异常/格式错误返回 None（调用方回退 ReAct）。"""
+        """分解任务。任何异常/格式错误返回 None（调用方回退 ReAct）。
+
+        先查历史成功计划模板（跨会话学习，免 LLM 调用）；未命中才调 LLM
+        现分解。
+        """
+        cached = self.recall_template(task)
+        if cached is not None:
+            logger.info("Planner: 复用历史成功计划（%d 子目标），免 LLM 调用",
+                        len(cached.subgoals))
+            return cached
         prompt = PLAN_SYSTEM_PROMPT.format(max=max_subgoals)
         messages = [
             {"role": "system", "content": prompt},
