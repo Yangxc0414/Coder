@@ -37,7 +37,12 @@ https://gitee.com/doraemon0414/coder-agent
 3. 会话恢复：每次运行镜像 journal，/resume 断点续跑，链式可恢复
 4. 演示回放：/record 录制运行 trace，/replay 离线回放（不依赖 API，
    用于演示环境兜底）；/health 后端侧 API 连通性检查
-5. 测试：python -m pytest tests/（370 例，无需 API key）
+5. 测试：python -m pytest tests/（374 例，无需 API key）
+6. 基准对照：python -m tests.benchmark_agent
+   coder_agent 全增强版 vs 纯 ReAct 基线（市面开源 agent 范式）的量化对照——
+   同一任务/同一确定性 LLM/同一工具环境，差异全部来自框架机制
+   （控制了模型变量）：步数/失败数持平，框架主动干预（失败换方法提示
+   注入）仅在增强版生效。把"方法优于基线"从定性表述变成可测量的证据
 
 四、设计参考
 实现了 ReAct / 上下文预算 / 子代理委派 / 失败恢复等通用范式；参考了
