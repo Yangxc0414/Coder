@@ -155,6 +155,17 @@ class Agent:
         # predates this task (pre-existing broken tests) — never retry it.
         self._verify_snapshot: int = 0
 
+        # 失败模式库（跨会话知识沉淀）：验证失败指纹化 + 策略轮换。
+        # 仅当配置了验证器时启用（无验证则无失败可记录）。
+        from .failure_patterns import FailurePatternLibrary
+        self._failure_library: "FailurePatternLibrary | None" = None
+        self._active_failure_fp: str | None = None
+        if self._verifier is not None:
+            try:
+                self._failure_library = FailurePatternLibrary(self.workspace)
+            except Exception as e:
+                logger.debug("failure pattern library init failed: %s", e)
+
         # LLM verifier setup (optional, enabled via --llm-verifier-mode)
         self._llm_verifier_mode = llm_verifier_mode if _LLM_VERIFIER_AVAILABLE else "off"
         self._progress_tracker: ProgressTracker | None = None
@@ -259,6 +270,7 @@ class Agent:
         # 0, not None: a failed check with zero mutations means the failure
         # predates this task (pre-existing broken tests) — never retry it.
         self._verify_snapshot: int = 0
+        self._active_failure_fp = None  # 失败指纹跨 run 不串（库本身跨会话保留）
         if self._progress_tracker:
             self._progress_tracker.problem = task
 
@@ -407,10 +419,42 @@ class Agent:
                             else:
                                 self._verify_snapshot = snapshot
                                 logger.warning("Verification failed, injecting prompt")
+                                inject = f"Verification failed:\n{summary}\nPlease fix the issues and try again."
+                                # 失败模式库：指纹化 + 策略轮换（同指纹第 2 次起
+                                # 强制换方法，并附带历史成功策略）
+                                if self._failure_library is not None:
+                                    try:
+                                        from .failure_patterns import _classify_failure
+                                        detail = "\n".join(
+                                            str(r.detail) for r in getattr(self._verifier, "_results", [])
+                                        )
+                                        category = _classify_failure(summary, detail)
+                                        files = [
+                                            f for f in (
+                                                getattr(self._verifier, "_last_test_failures", None) or set()
+                                            )
+                                        ]
+                                        rec = self._failure_library.record(category, files, summary, detail)
+                                        same_count = self._failure_library.occurrences(rec.fingerprint)
+                                        self._active_failure_fp = rec.fingerprint
+                                        advice = self._failure_library.repair_advice(
+                                            category, summary, detail, same_count)
+                                        if advice:
+                                            inject += "\n" + advice
+                                        note = self._failure_library.solved_note(rec.fingerprint)
+                                        if note:
+                                            inject += "\n" + note
+                                    except Exception as e:
+                                        logger.debug("failure pattern record failed: %s", e)
                                 self._append_message({
                                     "role": "user",
-                                    "content": f"Verification failed:\n{summary}\nPlease fix the issues and try again."
+                                    "content": inject,
                                 })
+                        else:
+                            # 验证通过 → 已知失败模式标记为已解决（知识闭环）
+                            if self._failure_library is not None and self._active_failure_fp:
+                                self._failure_library.mark_solved([self._active_failure_fp])
+                                self._active_failure_fp = None
                         # 携带检查项明细与接受原因（前端完整呈现达成判断）
                         self.hooks.fire(VERIFIER_RESULT.with_data(
                             passed=passed, summary=summary[:300],
