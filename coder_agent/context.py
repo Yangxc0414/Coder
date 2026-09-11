@@ -16,6 +16,13 @@ import logging
 from typing import Any
 
 from .llm.tokenizer import count_message_tokens, count_messages_tokens
+from .message_grading import (
+    CRITICAL,
+    HIGH,
+    LOW,
+    grade_messages,
+    pick_priority_messages,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +81,7 @@ class ContextManager:
         summary_max_chars: int = DEFAULT_SUMMARY_MAX_CHARS,
         model: str = "gpt-4o",
         context_window: int | None = None,
+        grade_messages: bool = True,
     ) -> None:
         self.model = model
         self.context_window = (context_window
@@ -89,6 +97,9 @@ class ContextManager:
             self.keep_rounds = max(4, min(32,
                                           self.max_tokens // 2500))
         self.summary_max_chars = summary_max_chars
+        # 分级保留开关：压缩最近轮次时按消息重要性筛选（CRITICAL 指令
+        # 无条件保留，LOW 噪声优先丢弃），保证关键信号存活到压缩终点
+        self.grade_messages = grade_messages
         # 最近一次 build_messages 的压缩统计（UI 展示用；None=尚未调用/无压缩）
         self.last_compression: dict | None = None
 
@@ -145,6 +156,12 @@ class ContextManager:
         for r in recent:
             recent_msgs.extend(r)
 
+        # 分级保留：最近轮次内 CRITICAL 指令（验证失败/策略拦截/预算收尾）
+        # 无条件保留，LOW 噪声（重复读文件/超长输出）优先丢弃。市面 agent
+        # 按时间一刀切，会把关键信号挤出上下文；本策略保证关键消息存活。
+        if self.grade_messages and len(recent_msgs) > 2:
+            recent_msgs = self._apply_grading(recent_msgs, budget)
+
         # Build final list: system + compressed summaries + recent full messages
         result.append({
             "role": "user",
@@ -171,8 +188,53 @@ class ContextManager:
             "compressed": compress_count,
             "tokens_est": current_tokens,
             "budget": budget,
+            "graded": bool(self.grade_messages and compress_count > 0),
         }
         return result
+
+    def _apply_grading(
+        self, recent_msgs: list[dict], budget: int
+    ) -> list[dict]:
+        """按消息保留等级筛选最近轮次内的消息（Enhancement 3 分级保留）。
+
+        保留策略：
+        - CRITICAL（用户原始任务/验证失败/策略拦截/预算收尾指令）无条件保留
+        - HIGH（高价值工具结果、关键推理）按时间倒序保留，填满预算
+        - LOW（重复读文件、超长工具输出）仅在有富余预算时保留
+
+        消息被丢弃时以一条短摘要替代（保留"发生过什么"的线索，避免
+        模型完全不知道早期消息存在）。
+        """
+        grades = grade_messages(recent_msgs)
+        # 预算内能塞多少条：CRITICAL 全保 + 剩余名额给 HIGH/LOW
+        n_crit = sum(1 for g in grades if g.grade >= CRITICAL)
+        budget_msgs = max(4, budget // 800)  # 每条约 800 tokens 的经验值
+        keep_idx = pick_priority_messages(recent_msgs, grades, budget_msgs)
+
+        # 统计被丢弃的消息，生成一条"已省略"占位
+        dropped = [
+            (i, m) for i, m in enumerate(recent_msgs) if i not in keep_idx
+        ]
+        result_msgs: list[dict] = []
+        placeholder_inserted = False
+        for i, m in enumerate(recent_msgs):
+            if i in keep_idx:
+                result_msgs.append(m)
+            elif not placeholder_inserted and dropped:
+                # 在被丢弃的第一条位置插入一条占位摘要
+                n_low = sum(1 for i2, _ in dropped if grades[i2].grade == LOW)
+                n_high = len(dropped) - n_low
+                result_msgs.append({
+                    "role": "user",
+                    "content": (
+                        f"[{len(dropped)} 条早期消息已按重要性省略"
+                        f"（保留 {len(keep_idx)} 条关键消息；"
+                        f"{n_high} 条中等 / {n_low} 条低价值被省略）。"
+                        "如需其中内容，请重新调用相应工具获取。]"
+                    ),
+                })
+                placeholder_inserted = True
+        return result_msgs
 
     def _split_into_rounds(self, messages: list[dict]) -> list[list[dict]]:
         """Split messages into rounds. Each round starts with a user/assistant

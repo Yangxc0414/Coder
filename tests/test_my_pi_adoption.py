@@ -217,7 +217,7 @@ class TestMemoryTool:
         tool = MemoryTool(mem, tmp_path)
         tool.execute({"action": "remember", "key": "k1", "content": "v1"})
         r = tool.execute({"action": "list"})
-        assert "k1: v1" in r.output
+        assert "k1" in r.output and "v1" in r.output
 
     def test_empty_content_rejected(self, tmp_path: Path):
         from coder_agent.memory import Memory
@@ -226,15 +226,22 @@ class TestMemoryTool:
         r = tool.execute({"action": "remember", "key": "k", "content": ""})
         assert not r.success
 
-    def test_cap_evicts_oldest(self, tmp_path: Path):
+    def test_cap_evicts_low_value_first(self, tmp_path: Path):
+        """增强 4：淘汰按重要性而非时间——偏好类 k0 比临时类 k29 更该留。"""
         from coder_agent.memory import Memory
 
         mem = Memory()
         tool = MemoryTool(mem, tmp_path)
-        for i in range(MemoryTool.MAX_ENTRIES + 5):
+        # 30 条普通 + 10 条临时状态（低权重）→ 淘汰 10 条临时类
+        for i in range(MemoryTool.MAX_ENTRIES):
             tool.execute({"action": "remember", "key": f"k{i}", "content": f"v{i}"})
+        for i in range(10):
+            tool.execute({"action": "remember", "key": f"临时状态{i}",
+                         "content": f"t{i}"})
         assert len(mem.long_term) == MemoryTool.MAX_ENTRIES
-        assert "k0" not in mem.long_term  # oldest evicted
+        kept_temp = [k for k in mem.long_term if k.startswith("临时状态")]
+        assert len(kept_temp) <= 2  # 临时类被优先淘汰
+        assert "k0" in mem.long_term  # 早期的普通记忆仍保留（按重要性非按时间）
 
     def test_registered_and_agent_wired(self, tmp_path: Path):
         agent = Agent(

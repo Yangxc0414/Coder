@@ -17,12 +17,31 @@ https://gitee.com/doraemon0414/coder-agent
 
 三、特色功能
 1. 零框架：ReAct 循环、上下文管理、输出解析、错误恢复全部自研，
-2. 三大支柱：
-   · 上下文与记忆：三层压缩+单消息占比保护、工具输出溢出转存、
-     Context/State/Memory 三分离动态注入、memory 工具（模型可写长期记忆）
-   · 工具与编排：17 个工具（5 核心+5 MCP+5 Skill+task 委派+memory）、
+   核心依赖仅 openai/tiktoken/python-dotenv，无任何 agent 框架
+2. 四大支柱：
+   · 上下文与记忆：模型感知三层压缩（单消息 60% 占比保护）、工具输出
+     溢出转存、消息分级保留（关键指令如验证失败/策略拦截优先存活，
+     低价值重复读取自动省略）、分层记忆（短期自动记录+模型可写长期
+     记忆+按重要性自动整理淘汰）
+   · 工具与安全：29 个工具（5 核心+5 MCP+17 Skill+task 委派+memory）、
      PolicyGate 三级安全（危险命令黑名单/路径逃逸校验/环境变量过滤）、
-     parser 五层验证、task 工具委派 4 类子代理（结构化反递归）
-   · 评估与恢复：独立 Verifier（pytest/语法/git 三重检查+变更门控）、三道终止闸（步数收尾轮/token 预算/验证门控）、
-     8 型差异化错误恢复、JSONL 全链路 trace
-3. 会话恢复：每次运行镜像 journal，/resume 断点续跑，链式可恢复。
+     parser 五层验证、工具失败自动降级路由（同类失败连败 2 次注入换方法建议）、
+     task 工具委派 4 类子代理（结构化反递归）
+   · 规划与编排：Plan-Execute-Verify 三段式——LLM 把复杂任务分解为
+     原子子目标依赖图，无依赖子目标线程池并行派发子代理执行，每层
+     验证门控；全部失败自动回退 ReAct（零降智）
+   · 评估与恢复：独立 Verifier（pytest/语法/git 三重检查+基线对比
+     +变更门控）、失败模式库（失败指纹化+按类别轮换修复策略+跨会话
+     知识沉淀，.coder_failure_patterns.json）、三道终止闸（步数收尾轮/
+     token 预算/验证门控）、8 型差异化错误恢复、JSONL 全链路 trace
+3. 会话恢复：每次运行镜像 journal，/resume 断点续跑，链式可恢复
+4. 演示回放：/record 录制运行 trace，/replay 离线回放（不依赖 API，
+   用于演示环境兜底）；/health 后端侧 API 连通性检查
+5. 测试：python -m pytest tests/（370 例，无需 API key）
+
+四、设计参考
+实现了 ReAct / 上下文预算 / 子代理委派 / 失败恢复等通用范式；参考了
+mini-swe-agent（FormatError 恢复）、OneCode（输出截断加倍重试）、
+smolagents（工具验证）、my-pi-agent（记忆工具化/结构化反递归）的
+实现思路，全部代码为本仓库独立实现与测试。
+API key 仅通过 .env 提供，已列入 .gitignore，绝不出现在仓库中。

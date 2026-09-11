@@ -23,6 +23,7 @@ from .hooks import HookRegistry, install_logging_hooks, install_trace_hooks, PRE
 from .extensions.base import SubagentRunner
 from .journal import SessionJournal
 from .planner import Planner
+from .tool_fallback import ToolFallbackRouter
 
 try:
     from .verifier_llm import ProgressTracker, select as llm_select
@@ -165,6 +166,8 @@ class Agent:
                 self._failure_library = FailurePatternLibrary(self.workspace)
             except Exception as e:
                 logger.debug("failure pattern library init failed: %s", e)
+        # 工具失败自动降级路由器（同工具同类别连败 ≥2 注入换方法建议）
+        self._tool_fallback = ToolFallbackRouter()
 
         # LLM verifier setup (optional, enabled via --llm-verifier-mode)
         self._llm_verifier_mode = llm_verifier_mode if _LLM_VERIFIER_AVAILABLE else "off"
@@ -206,6 +209,14 @@ class Agent:
             memory_tool = MemoryTool(self.memory, self.workspace)
             memory_tool.load_from_disk()
             self.registry.register(memory_tool)
+        # 运行结束自动整理记忆（跨会话学习：去重 + 按重要性淘汰）
+        try:
+            mt = self.registry.get("memory")
+            hook = getattr(mt, "consolidate_on_run_end", None)
+            if callable(hook):
+                hook()
+        except Exception:
+            logger.debug("memory consolidation on run end failed", exc_info=True)
 
     def _stream_kwargs(self) -> dict:
         """仅当 LLM 支持 on_token 且配置了回调时才传（兼容测试 mock）。"""
@@ -271,6 +282,7 @@ class Agent:
         # predates this task (pre-existing broken tests) — never retry it.
         self._verify_snapshot: int = 0
         self._active_failure_fp = None  # 失败指纹跨 run 不串（库本身跨会话保留）
+        self._tool_fallback.reset()  # 工具失败连败计数跨 run 清零
         if self._progress_tracker:
             self._progress_tracker.problem = task
 
@@ -773,6 +785,21 @@ class Agent:
             success=result.success,
             output=result.output or "",
         )
+
+        # 工具失败自动降级（Enhancement 5）：同工具同类别连败 ≥2 时注入
+        # 换方法建议（而非模型反复换参数重试同一工具烧步数）
+        # 注意：run_command 已有自己的命令失败策略提示（_cmd_fail_streak，
+        # 3 连败注入平台化建议），两者叠加会重复唠叨——命令类交给既有逻辑
+        self._tool_fallback.note(parsed.tool_name, result.error)
+        if parsed.tool_name != "run_command":
+            advice = self._tool_fallback.due_advice(parsed.tool_name)
+            if advice:
+                self._append_message({
+                    "role": "user",
+                    "content": advice,
+                })
+                self.trace.record(self._n_steps, "tool_fallback_hint",
+                                  tool=parsed.tool_name)
 
         # Command-failure streak tracking → adaptive strategy hint.
         # Real-run finding: 13 consecutive failed commands with the SAME

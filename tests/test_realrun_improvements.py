@@ -109,8 +109,9 @@ class TestCommandFailureHints:
         agent = self._agent(tmp_path, llm)
         agent.run("try commands")
         hint_messages = [m for m in agent.messages
-                         if m.get("role") == "user" and "连续失败" in (m.get("content") or "")]
-        assert len(hint_messages) == 1  # injected exactly once
+                         if m.get("role") == "user"
+                         and "命令已连续失败" in (m.get("content") or "")]
+        assert len(hint_messages) == 1  # 命令类走既有策略提示，注入恰好一次
         if sys.platform == "win32":
             assert "python3" in hint_messages[0]["content"]
 
