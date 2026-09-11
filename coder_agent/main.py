@@ -62,7 +62,7 @@ def main() -> None:
     parser.add_argument("task", nargs="?", help="Programming task description")
     parser.add_argument("--task-file", help="Read task from file")
     parser.add_argument("--workspace", default=".", help="Workspace directory")
-    parser.add_argument("--model", default=os.getenv("MODEL_NAME", "agnes-2.5-flash"),
+    parser.add_argument("--model", default=os.getenv("MODEL_NAME", "agnes-3.0-flash"),
                         help="Model name (default: agnes-2.5-flash)")
     parser.add_argument("--base-url", default=os.getenv("OPENAI_BASE_URL"),
                         help="OpenAI-compatible API base URL")

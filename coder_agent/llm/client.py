@@ -49,7 +49,7 @@ class LLMClient:
         base_url: str | None = None,
     ) -> None:
         # 配置优先级：显式参数 > ~/.coder_config.json > 环境变量
-        self.model = model or _USER_CFG.get("model") or "agnes-2.5-flash"
+        self.model = model or _USER_CFG.get("model") or "agnes-3.0-flash"
         self.base_url = (base_url or _USER_CFG.get("base_url")
                          or os.getenv("OPENAI_BASE_URL"))
         resolved_key = (api_key or _USER_CFG.get("api_key")
@@ -94,6 +94,64 @@ class LLMClient:
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8", "replace"))
         return sorted(str(m["id"]) for m in data.get("data", []) if m.get("id"))
+
+    def _chat_once_urllib(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None,
+        max_tokens: int,
+    ) -> LLMResponse:
+        """标准库版 chat（SDK 传输层被网络代理/TLS 沙箱拦截时的回退路径）。
+
+        沙箱环境下 httpx 的 TLS 握手被中间代理破坏（EOF violation），
+        urllib 走不同的 TLS 路径可通。回退实现覆盖非流式语义：
+        工具调用/usage/finish_reason 与 SDK 路径对齐，on_token 流式在
+        回退模式下退化为非流式（流式失败本来也走 _chat_once）。
+        """
+        import urllib.request
+
+        base = (self.base_url or "https://api.openai.com/v1").rstrip("/")
+        key = self._client.api_key or ""
+        params: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+        }
+        if tools:
+            params["tools"] = tools
+            params["tool_choice"] = "auto"
+        req = urllib.request.Request(
+            base + "/chat/completions",
+            data=json.dumps(params).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {key}",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+        choice = data["choices"][0]
+        msg = choice.get("message") or {}
+        tc_list = None
+        if msg.get("tool_calls"):
+            tc_list = [
+                {"id": tc.get("id", ""),
+                 "name": (tc.get("function") or {}).get("name", ""),
+                 "arguments": (tc.get("function") or {}).get("arguments", "")}
+                for tc in msg["tool_calls"]
+            ]
+        usage = data.get("usage")
+        return LLMResponse(
+            content=msg.get("content"),
+            tool_calls=tc_list,
+            finish_reason=choice.get("finish_reason"),
+            usage=(
+                {"prompt_tokens": usage.get("prompt_tokens", 0),
+                 "completion_tokens": usage.get("completion_tokens", 0)}
+                if usage else None
+            ),
+        )
 
     def chat(
         self,
@@ -189,7 +247,32 @@ class LLMClient:
             params["tools"] = tools
             params["tool_choice"] = "auto"
 
-        response = self._client.chat.completions.create(**params)
+        try:
+            response = self._client.chat.completions.create(**params)
+        except Exception as sdk_err:
+            # SDK 传输层异常（沙箱代理 TLS 拦截等）→ urllib 回退。
+            # 仅对"连接/传输"类错误回退；API 层面的 4xx/5xx 直接上抛
+            # （urllib 重放同样会拿到相同错误，不掩盖真实故障）。
+            # openai.APIConnectionError / httpx.ConnectError 都算传输层故障。
+            _is_transport = False
+            try:
+                from openai import APIConnectionError as _OAIC
+                _is_transport = isinstance(sdk_err, _OAIC)
+            except Exception:
+                pass
+            if not _is_transport:
+                import httpx
+                _is_transport = isinstance(sdk_err, (
+                    httpx.ConnectError, httpx.ConnectTimeout,
+                    httpx.ReadTimeout, httpx.RemoteProtocolError,
+                    httpx.ProxyError,
+                ))
+            if _is_transport:
+                try:
+                    return self._chat_once_urllib(messages, tools, max_tokens)
+                except Exception:
+                    raise sdk_err
+            raise
         choice = response.choices[0]
 
         tc_list = None

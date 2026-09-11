@@ -37,7 +37,8 @@ DEFAULT_SUMMARY_MAX_CHARS = 150
 MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "agnes-2.5-pro": 262144,   # 256K
     "agnes-2.0-pro": 262144,
-    "agnes-2.5-flash": 524288,  # 512K（官方）
+    "agnes-2.5-flash": 524288,
+    "agnes-3.0-flash": 524288,  # flash 系 512K（与 agnes-2.5-flash 同档）  # 512K（官方）
     "agnes-2.0-flash": 524288,
     "agnes": 524288,           # agnes 系列默认 512K
     "deepseek": 65536,

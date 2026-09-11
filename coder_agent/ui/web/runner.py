@@ -67,7 +67,7 @@ class RunManager:
         self._seq = 0
         self._lock = threading.Lock()
         self._last_run_id: str | None = None
-        self.model = "agnes-2.5-flash"
+        self.model = "agnes-3.0-flash"
         self.mode = "full"
         # API 配置：优先读取 ~/.coder_config.json，其次环境变量
         cfg = load_config()
