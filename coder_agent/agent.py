@@ -22,6 +22,7 @@ from .inspector import ContextInspector
 from .hooks import HookRegistry, install_logging_hooks, install_trace_hooks, PRE_TOOL_USE, POST_TOOL_USE, TURN_STOPPED, AGENT_STARTED, AGENT_ENDED, ASSISTANT_TEXT, VERIFIER_RESULT, FORMAT_ERROR, LOOP_DETECTED, RECOVERY_EVENT, LENGTH_RETRY, BUDGET_EXHAUSTED
 from .extensions.base import SubagentRunner
 from .journal import SessionJournal
+from .planner import Planner
 
 try:
     from .verifier_llm import ProgressTracker, select as llm_select
@@ -110,6 +111,7 @@ class Agent:
         token_budget: int | None = None,
         stream_callback: Any = None,
         llm_max_tokens: int | None = None,
+        use_planner: bool | None = None,
     ) -> None:
         self.llm = llm_client
         self.registry = registry
@@ -134,6 +136,10 @@ class Agent:
         self._llm_max_tokens = llm_max_tokens or DEFAULT_LLM_MAX_TOKENS
         # run() 重置升级状态时恢复到基准预算（保留构造时显式指定的值）
         self._llm_max_tokens_base = self._llm_max_tokens
+        # Plan-Execute-Verify 编排器：复杂任务自动分解 + 子代理并行执行。
+        # 失败一律回退 ReAct（零降智原则）。显式 use_planner=False 可关闭。
+        self._use_planner = bool(use_planner)
+        self._planner: Planner | None = Planner(llm_client=llm_client) if self._use_planner else None
         self._length_escalated = False
         self.inspector = ContextInspector()
         self.messages: list[dict] = []
@@ -276,6 +282,14 @@ class Agent:
                         )
                 except Exception as e:
                     logger.warning("Verifier baseline capture failed: %s", e)
+
+        # ── Plan-Execute-Verify：复杂任务先分解为子目标图，子代理并行执行。
+        # 任何环节失败（无 plan / 子代理异常 / 层验证失败）都回退主循环
+        # 继续 ReAct，保证零降智（planner 只加速，不制造新的失败模式）。
+        if self._planner is not None and not resume:
+            plan_answer = self._try_plan_execute_verify(task)
+            if plan_answer is not None:
+                return plan_answer
 
         while self._n_steps < self._max_steps:
             if self._abort_requested:
@@ -533,6 +547,73 @@ class Agent:
             final_state=self.state.to_status_prompt(),
         ))
         return "Agent reached maximum steps without completing the task."
+
+    def _try_plan_execute_verify(self, task: str) -> str | None:
+        """Plan-Execute-Verify 编排路径。返回 None 表示回退 ReAct。
+
+        设计原则（零降智）：
+        - planner 判定任务不值得分解 / LLM 调用失败 / 分解格式错误 → None
+        - 子代理执行整体抛异常 → None（ReAct 继续）
+        - 仅当整张图跑完且无子目标失败 → 返回汇总答案（终止运行）
+        - 部分子目标失败 → 把已完成层结果作为上下文注入 ReAct 继续，
+          而非硬终止（失败模式由主循环的验证门控兜底）
+        """
+        from .planner import should_use_planner
+        if not should_use_planner(task, self.mode):
+            return None
+        plan = self._planner.plan(task)
+        if plan is None:
+            self.trace.record(0, "planner_skipped")
+            return None
+        self.trace.record(0, "plan_created", subgoals=len(plan.subgoals),
+                         layers=len(plan.layers))
+        logger.info("Planner: %d subgoals in %d layers",
+                    len(plan.subgoals), len(plan.layers))
+        try:
+            from .plan_executor import PlanExecutor
+            executor = PlanExecutor(
+                runner=self.subagent_runner,
+                verifier=self._verifier,
+            )
+            outcomes, all_passed = executor.execute(plan, task)
+        except Exception as e:
+            logger.warning("Plan execution failed, falling back to ReAct: %s", e)
+            self.trace.record(self._n_steps, "planner_fallback", error=str(e))
+            return None
+        failed = [o for o in outcomes if o.is_error]
+        if not failed and all_passed:
+            # 全部子目标成功 + 每层验证通过 → 汇总为最终答案
+            summary_lines = [f"已按 {len(plan.layers)} 层计划并行完成全部 {len(outcomes)} 个子目标："]
+            for o in outcomes:
+                body = o.report.strip()
+                if len(body) > 2000:
+                    body = body[:2000] + "…"
+                summary_lines.append(f"\n【子目标 #{o.subgoal.index + 1}】{o.subgoal.goal}\n{body}")
+            self.trace.record(self._n_steps, "plan_completed",
+                             subgoals=len(outcomes), all_passed=all_passed)
+            self._append_message({"role": "assistant",
+                                 "content": "\n".join(summary_lines).strip()})
+            return "\n".join(summary_lines).strip()
+        # 有子目标失败（或某层验证未过）→ 把已完成部分注入上下文，回退 ReAct
+        done_lines = []
+        for o in outcomes:
+            if o.is_error:
+                continue
+            body = o.report.strip()
+            if len(body) > 1500:
+                body = body[:1500] + "…"
+            done_lines.append(f"【已完成 #{o.subgoal.index + 1}】{o.subgoal.goal}：\n{body}")
+        fail_lines = [f"【失败 #{o.subgoal.index + 1}】{o.subgoal.goal}：{o.report[:400]}"
+                      for o in failed]
+        fallback_ctx = (
+            "（并行子代理执行了计划的一部分，以下是结果。请基于此继续，"
+            "不要重复已完成的工作，并修复失败项：）\n"
+            + "\n\n".join(done_lines + fail_lines)
+        )
+        self._append_message({"role": "user", "content": fallback_ctx})
+        self.trace.record(self._n_steps, "plan_partial_fallback",
+                          failed=len(failed), all_passed=all_passed)
+        return None
 
     def _query_llm(self) -> LLMResponse:
         # Build context-bounded message list with dynamic state/memory injection
