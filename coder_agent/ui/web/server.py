@@ -577,17 +577,21 @@ async def api_replay(trace: str):
     iter_ = manager.replay_events(path)
 
     async def gen():
+        done_seen = False
         try:
             for event in iter_:
+                if event.get("kind") == "done":
+                    done_seen = True
                 yield f"data: {_json.dumps(event, ensure_ascii=False)}\n\n"
                 await asyncio.sleep(0)
         except Exception as e:
             # 把异常转为前端可消费的 error 事件，避免 StreamingResponse 崩溃
             yield f"data: {_json.dumps({'kind': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n"
         finally:
-            # 补发 done，与实时 SSE 语义一致：前端靠 done 收尾
-            # （复位运行态、清理 pending、显示"运行完成"）
-            yield f"data: {_json.dumps({'kind': 'done'}, ensure_ascii=False)}\n\n"
+            # 仅在流未以 done 收尾时补发（replay_events 正常路径已发 done），
+            # 与实时 SSE 语义一致：前端靠 done 收尾（复位运行态、清理 pending）
+            if not done_seen:
+                yield f"data: {_json.dumps({'kind': 'done'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
