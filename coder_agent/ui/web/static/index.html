@@ -2065,10 +2065,16 @@ async function renderExtList() {
 }
 function extRow(kind, item) {
   const enabled = item.enabled !== false;
+  const isInstalled = item.source === "installed";
+  const sourceBadge = isInstalled
+    ? ' <span title="' + escHtml(item.repo_url || "installed") + '" ' +
+      'style="color:var(--ok);font-size:10px;font-weight:600;">⬇️ 已安装</span>'
+    : ' <span style="color:var(--faint);font-size:10px;">内置</span>';
   return '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;' +
     (enabled ? "" : "opacity:.5;") + 'border-bottom:1px solid var(--border);">' +
     '<div style="flex:1;min-width:0;">' +
     '<span style="color:var(--accent);font-family:Consolas,monospace;font-size:12px;">' + escHtml(item.name) + '</span>' +
+    sourceBadge +
     (enabled ? "" : ' <span style="color:var(--err);font-size:10px;">已禁用</span>') +
     '<div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' +
     escHtml(item.description) + '</div></div>' +
