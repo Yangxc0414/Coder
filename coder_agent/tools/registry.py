@@ -99,4 +99,20 @@ def create_default_registry(workspace, mode, with_extensions: bool = True) -> To
         for skill in get_builtin_skills():
             registry.register(skill)
 
+        # agent 自主下载扩展工具（install_skill / install_mcp）：
+        # 模型在对话中即可下载 GitHub 仓库里的 skill/mcp 并即时注册。
+        from coder_agent.tools.install_tools import InstallSkillTool, InstallMcpTool
+        registry.register(InstallSkillTool(registry, workspace_path, mode))
+        registry.register(InstallMcpTool(registry, workspace_path, mode))
+
+        # 跨会话保留：把上一会话安装的扩展（~/.coder_extensions/）也注册进来
+        from coder_agent.extensions.installer import ExtensionInstaller
+        installed = ExtensionInstaller().list_installed()
+        for tool in list(installed.get("skills", [])) + list(installed.get("mcp", [])):
+            try:
+                registry.register(tool)
+            except ValueError:
+                # 与内置扩展重名（如都叫 xlsx）→ 保留内置，跳过
+                pass
+
     return registry
