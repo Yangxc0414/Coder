@@ -344,11 +344,32 @@ def _run_onecode(ws: Path) -> AgentRunResult:
     return AgentRunResult(name="OneCode(AgentLoop)", **d)
 
 
+def _run_smolagents(ws: Path) -> AgentRunResult:
+    """跑 smolagents 真身（CodeAgent + LocalPythonExecutor）在同一任务上。
+
+    smolagents 要求 Python >=3.10（CodeAgent 走 <code> 块 + 本地
+    Python executor 执行代码范式），通过 3.10+ 子进程驱动
+    （tests/smolagents_driver.py 内嵌子进程脚本），确定性 LLM 脚本
+    与 coder_agent 侧同一 10 步试错轨迹，结果指标经 JSON 回传。
+    """
+    import sys
+    if str(Path(__file__).resolve().parent) not in sys.path:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from smolagents_driver import run_smolagents_subprocess
+    d = run_smolagents_subprocess(ws)
+    d.setdefault("peak_messages", 0)
+    d.setdefault("framework_interventions", 0)
+    d.setdefault("steps", 0)
+    d.setdefault("tool_failures", 0)
+    return AgentRunResult(name="smolagents(CodeAgent)", **d)
+
+
 def run_cross_benchmark(root: Path) -> dict:
     results = []
     for sub, runner in [
         ("mswea", _run_mswea),
         ("onecode", _run_onecode),
+        ("smolagents", _run_smolagents),
         ("ca_full", _run_coder_agent_full),
         ("ca_base", _run_coder_agent_baseline),
     ]:
@@ -360,6 +381,7 @@ def run_cross_benchmark(root: Path) -> dict:
         "results": results,
         "mswea": next(r for r in results if r.name.startswith("mini-swe-agent")),
         "onecode": next((r for r in results if r.name.startswith("OneCode")), None),
+        "smolagents": next((r for r in results if r.name.startswith("smolagents")), None),
         "ca_full": next(r for r in results if r.name.startswith("coder_agent(full)")),
         "ca_base": next(r for r in results if r.name.startswith("coder_agent(baseline")),
     }
@@ -367,8 +389,9 @@ def run_cross_benchmark(root: Path) -> dict:
 
 def print_report(res: dict) -> None:
     rows = [res["mswea"]]
-    if res.get("onecode"):
-        rows.append(res["onecode"])
+    for k in ("onecode", "smolagents"):
+        if res.get(k):
+            rows.append(res[k])
     rows += [res["ca_base"], res["ca_full"]]
     print("=" * 72)
     print("跨实现对照（同一任务 / 同一确定性 LLM / 同一工具环境）")
@@ -384,21 +407,26 @@ def print_report(res: dict) -> None:
           f"{'成功' if res['mswea'].success else '失败'}")
     if res["mswea"].error:
         print(f"  异常: {res['mswea'].error[:300]}")
-    if res.get("onecode"):
-        oc = res["onecode"]
-        print(f"OneCode 真身（AgentLoop 原封不动）：{'成功' if oc.success else '失败'}"
-              + (f"  异常: {oc.error[:200]}" if oc.error else ""))
+    for k, label in (("onecode", "OneCode 真身（AgentLoop 原封不动）"),
+                     ("smolagents", "smolagents 真身（CodeAgent 原封不动）")):
+        r = res.get(k)
+        if r:
+            print(f"{label}：{'成功' if r.success else '失败'}"
+                  + (f"  异常: {r.error[:200]}" if r.error else ""))
     print("=" * 72)
 
 
 def write_report_md(res: dict, out_path: Path) -> None:
     b, f, p = res["mswea"], res["ca_full"], res["ca_base"]
     oc = res.get("onecode")
+    sa = res.get("smolagents")
     rows = [
         f"| {b.name} | {b.steps} | {b.tool_failures} | {b.peak_messages} | {b.framework_interventions} | {b.elapsed_sec} | {'成功' if b.success else '失败'} |",
     ]
     if oc:
-        rows.append(f"| {oc.name} | {oc.steps} | {oc.tool_failures} | {oc.peak_messages} | {oc.framework_interventions} | - | {'成功' if oc.success else '失败'} |")
+        rows.append(f"| {oc.name} | {oc.steps} | {oc.tool_failures} | {oc.peak_messages} | {oc.framework_interventions} | {oc.elapsed_sec if oc.elapsed_sec is not None else '-'} | {'成功' if oc.success else '失败'} |")
+    if sa:
+        rows.append(f"| {sa.name} | {sa.steps} | {sa.tool_failures} | {sa.peak_messages} | {sa.framework_interventions} | {sa.elapsed_sec if sa.elapsed_sec is not None else '-'} | {'成功' if sa.success else '失败'} |")
     rows += [
         f"| {p.name} | {p.steps} | {p.tool_failures} | {p.peak_messages} | {p.framework_interventions} | {p.elapsed_sec} | {'成功' if p.success else '失败'} |",
         f"| {f.name} | {f.steps} | {f.tool_failures} | {f.peak_messages} | {f.framework_interventions} | {f.elapsed_sec} | {'成功' if f.success else '失败'} |",
@@ -406,8 +434,11 @@ def write_report_md(res: dict, out_path: Path) -> None:
     oc_line = (f"- **OneCode 真身**（AgentLoop 原封不动）：步数 {oc.steps}，"
                f"工具失败 {oc.tool_failures}，**框架干预 0**——同样不做失败信号结构化。"
                if oc else "")
+    sa_line = (f"- **smolagents 真身**（CodeAgent 原封不动）：步数 {sa.steps}，"
+               f"工具失败 {sa.tool_failures}，**框架干预 0**——代码执行范式同样无失败策略。"
+               if sa else "")
     lines = [
-        "# 跨实现对照：coder_agent vs mini-swe-agent / OneCode（真实开源 agent）",
+        "# 跨实现对照：coder_agent vs mini-swe-agent / OneCode / smolagents（真实开源 agent）",
         "",
         "同一任务（修 main.py + 跑失败命令试错）在各实现上各跑一遍，",
         "确定性 LLM 替身（固定 10 步试错轨迹）驱动，模型变量被控制，",
@@ -423,15 +454,16 @@ def write_report_md(res: dict, out_path: Path) -> None:
         f"  步数 {b.steps}，工具失败 {b.tool_failures}，峰值上下文 {b.peak_messages} 条，",
         f"  **框架干预 0**——对同类别失败命令 3 连败无任何'换方法'提示，放任试错。",
         f"{oc_line}",
+        f"{sa_line}",
         f"- **coder_agent 纯 ReAct 基线**（关闭全部 7 项增强）：步数 {p.steps}，",
-        f"  工具失败 {p.tool_failures}，干预 0——与两个开源实现同范式。",
+        f"  工具失败 {p.tool_failures}，干预 0——与三个开源实现同范式。",
         f"- **coder_agent 全增强**：步数 {f.steps}，工具失败 {f.tool_failures}，",
         f"  **框架干预 {f.framework_interventions}**——失败模式库 + 命令连败策略 +",
         "  工具降级路由主动注入'换方法'提示，避免模型在同一失败上反复烧步数。",
         "",
         "结论：coder_agent 全增强版在步数/失败数上与纯 ReAct 基线（及",
-        "mini-swe-agent / OneCode 范式）持平或更优，且**独有框架主动干预**（失败信号",
-        "结构化 + 策略轮换 + 跨会话知识沉淀），这是这些开源 agent 核心 loop",
+        "mini-swe-agent / OneCode / smolagents 范式）持平或更优，且**独有框架主动干预**",
+        "（失败信号结构化 + 策略轮换 + 跨会话知识沉淀），这是这些开源 agent 核心 loop",
         "所不具备的方法层差异。",
         "",
     ]

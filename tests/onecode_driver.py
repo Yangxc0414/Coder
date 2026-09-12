@@ -203,6 +203,8 @@ loop = AgentLoop(state=state, message_store=store, context_engine=context,
                  model_client=model, tool_executor=tools)
 
 (ws / "main.py").write_text("print(0)\n", encoding="utf-8")
+import time as _time
+t0 = _time.time()
 
 async def drive():
     events = []
@@ -225,6 +227,8 @@ async def drive():
                 "framework_interventions": 0,
                 "final_answer": "", "elapsed_sec": None,
                 "traceback": traceback.format_exc()[-500:]}
+    import time as _time
+    t1 = _time.time()
     n_fail = sum(1 for r in tool_results if r.is_error)
     return {
         "success": True,
@@ -233,11 +237,11 @@ async def drive():
         "peak_messages": len(store._messages),
         "framework_interventions": 0,
         "final_answer": "done: fixed main.py",
+        "elapsed_sec": round(_time.time() - t0, 2),
         "error": "",
     }
 
 res = asyncio.run(drive())
-res["elapsed_sec"] = None
 print("ONEDRIVER_RESULT: " + json.dumps(res))
 """
 

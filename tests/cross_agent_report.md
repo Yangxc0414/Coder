@@ -1,4 +1,4 @@
-# 跨实现对照：coder_agent vs mini-swe-agent / OneCode（真实开源 agent）
+# 跨实现对照：coder_agent vs mini-swe-agent / OneCode / smolagents（真实开源 agent）
 
 同一任务（修 main.py + 跑失败命令试错）在各实现上各跑一遍，
 确定性 LLM 替身（固定 10 步试错轨迹）驱动，模型变量被控制，
@@ -6,10 +6,11 @@
 
 | 实现 | 步数(模型调用) | 工具失败 | 峰值上下文消息 | 框架干预 | 耗时(s) | 结果 |
 |------|------|------|------|------|------|------|
-| mini-swe-agent(DefaultAgent) | 12 | 4 | 27 | 0 | 1.65 | 成功 |
-| OneCode(AgentLoop) | 9 | 3 | 18 | 0 | - | 成功 |
-| coder_agent(baseline=纯ReAct) | 8 | 3 | 20 | 0 | 0.18 | 成功 |
-| coder_agent(full) | 8 | 3 | 20 | 1 | 1.21 | 成功 |
+| mini-swe-agent(DefaultAgent) | 12 | 4 | 27 | 0 | 2.19 | 成功 |
+| OneCode(AgentLoop) | 9 | 3 | 18 | 0 | 0.27 | 成功 |
+| smolagents(CodeAgent) | 9 | 3 | 30 | 0 | 0.21 | 成功 |
+| coder_agent(baseline=纯ReAct) | 8 | 3 | 20 | 0 | 0.2 | 成功 |
+| coder_agent(full) | 8 | 3 | 20 | 1 | 1.4 | 成功 |
 
 ## 解读
 
@@ -17,13 +18,14 @@
   步数 12，工具失败 4，峰值上下文 27 条，
   **框架干预 0**——对同类别失败命令 3 连败无任何'换方法'提示，放任试错。
 - **OneCode 真身**（AgentLoop 原封不动）：步数 9，工具失败 3，**框架干预 0**——同样不做失败信号结构化。
+- **smolagents 真身**（CodeAgent 原封不动）：步数 9，工具失败 3，**框架干预 0**——代码执行范式同样无失败策略。
 - **coder_agent 纯 ReAct 基线**（关闭全部 7 项增强）：步数 8，
-  工具失败 3，干预 0——与两个开源实现同范式。
+  工具失败 3，干预 0——与三个开源实现同范式。
 - **coder_agent 全增强**：步数 8，工具失败 3，
   **框架干预 1**——失败模式库 + 命令连败策略 +
   工具降级路由主动注入'换方法'提示，避免模型在同一失败上反复烧步数。
 
 结论：coder_agent 全增强版在步数/失败数上与纯 ReAct 基线（及
-mini-swe-agent / OneCode 范式）持平或更优，且**独有框架主动干预**（失败信号
-结构化 + 策略轮换 + 跨会话知识沉淀），这是这些开源 agent 核心 loop
+mini-swe-agent / OneCode / smolagents 范式）持平或更优，且**独有框架主动干预**
+（失败信号结构化 + 策略轮换 + 跨会话知识沉淀），这是这些开源 agent 核心 loop
 所不具备的方法层差异。
