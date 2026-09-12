@@ -699,6 +699,7 @@ class RunManager:
         返回 trace 路径（创建空文件，待后续 append）。
         """
         import datetime as _dt
+        import json as _json
         stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         rec_dir = Path.home() / ".coder_replays"
         rec_dir.mkdir(parents=True, exist_ok=True)
@@ -723,7 +724,7 @@ class RunManager:
         ev = dict(event)
         ev["timestamp"] = int(_dt.datetime.now().timestamp() * 1000)
         with open(p, "a", encoding="utf-8") as f:
-            f.write(_json.dumps(ev, ensure_ascii=False) + "\n")
+            f.write(json.dumps(ev, ensure_ascii=False) + "\n")
 
     def recent_replays(self, limit: int = 5) -> list[dict]:
         """列出最近的回放 trace 文件（供 /replay 无参时选最近一条）。"""
@@ -733,10 +734,11 @@ class RunManager:
         out = []
         for f in files:
             try:
-                meta = _json.loads(f.read_text(encoding="utf-8").splitlines()[0])
-                ev_count = sum(1 for l in f.read_text(encoding="utf-8").splitlines()
-                               if l.strip() and not l.strip().startswith("#")
-                               and not l.strip().startswith("{"))
+                meta = json.loads(f.read_text(encoding="utf-8").splitlines()[0])
+                lines = f.read_text(encoding="utf-8").splitlines()
+                # 事件数 = 可回放的事件行（含 meta 行本身与 event/tool_result 行）
+                ev_count = sum(1 for l in lines
+                               if l.strip() and not l.strip().startswith("#"))
                 out.append({"path": str(f), "task": meta.get("task", "?"),
                             "mode": meta.get("mode", "?"),
                             "events": ev_count})
