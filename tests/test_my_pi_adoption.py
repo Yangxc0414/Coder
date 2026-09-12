@@ -42,8 +42,9 @@ class TestTaskTool:
         assert "task" in agent.registry.list_names()
 
     def test_total_tools_now_29(self, tmp_path: Path):
-        """29 tools: 5 core + 5 mcp + 17 skill + task + memory.
-        (Was 17 when only 5 skills were registered; now 17 built-in skills.)"""
+        """核心 5 + MCP 5 + Skill 17 + task + memory + install_skill + install_mcp = 31.
+        (install_* 是 agent 自主下载扩展的新工具；若 ~/.coder_extensions/ 有已装
+        扩展还会再加，故总数只断言下限 + 关键项存在。)"""
         from coder_agent.tools.registry import create_default_registry
 
         agent = Agent(
@@ -62,10 +63,11 @@ class TestTaskTool:
         # Skill 17
         skill_names = [n for n in names if n.startswith("skill_")]
         assert len(skill_names) == 17, f"Skill 数量不符: {len(skill_names)}"
-        # task + memory
-        assert "task" in names
-        assert "memory" in names
-        assert len(names) == 29, f"总数不符: {len(names)} (期望 29)"
+        # task + memory + install_*
+        for n in ("task", "memory", "install_skill", "install_mcp"):
+            assert n in names, f"扩展工具缺失: {n}"
+        # 总数下限（已安装扩展会再加，故用 >=）
+        assert len(names) >= 31, f"总数不符: {len(names)} (期望 >= 31)"
 
     def test_delegation_via_tool(self, tmp_path: Path):
         """Model calls task → SubagentRunner runs the child → report returned."""
