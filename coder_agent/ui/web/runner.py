@@ -412,11 +412,16 @@ class RunManager:
     # ── 停止 ────────────────────────────────────────────────────────────
 
     def abort(self, run_id: str | None = None) -> None:
-        """协作式停止：指定 run_id 或全部运行。"""
+        """协作式停止：指定 run_id 或全部运行。
+
+        run_id 缺省时只停"最新"会话（与 stream_events/_session 的
+        缺省语义一致）——避免一次 UI 停止误杀用户并行的其它会话。
+        """
         if run_id:
             targets = [self._sessions[run_id]] if run_id in self._sessions else []
         else:
-            targets = list(self._sessions.values())
+            latest = self._sessions.get(self._last_run_id or "")
+            targets = [latest] if latest else []
         for s in targets:
             if s.agent is not None:
                 s.agent.request_abort()
