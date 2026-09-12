@@ -23,15 +23,19 @@ def _user_config() -> dict:
 def _replay_stream_tokens(text: str, on_token: Any) -> None:
     """非流式响应拿到后，按 4 字符分块回放 on_token 回调（模拟打字机）。
 
-    SDK/urllib 流式失败、降级到非流式时调用：保证 UI 仍有逐字流式效果，
-    而不是等整段返回后一次性弹出（感知上的"卡 3-5 秒再出结果"）。
-    中文 4 字符/块 ≈ 约 2 token/块，节奏接近真实流式。
+    SDK/urllib 流式失败、降级到非流式时调用：保证 UI 仍有逐字流式效果。
+    中文 4 字符/块 ≈ 约 2 token/块；块间 sleep 0.02s（约 50 字符/秒，
+    真实 API 流式速度在 30-80 字符/秒区间），让前端能逐块渲染而非
+    整段一次性涌出。
     """
+    import time as _time
+
     if not text or on_token is None:
         return
     step = 4
     for i in range(0, len(text), step):
         on_token(text[i:i + step])
+        _time.sleep(0.02)
 
 
 def _sleep_between_chunks(n_chunks: int) -> None:
