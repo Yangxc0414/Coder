@@ -1,169 +1,35 @@
-# coder-agent (Coder)
+# Coder — 零框架自研编码 Agent
 
-A minimal, self-implemented coding agent with a ReAct loop.
-No agent frameworks — every piece of core logic (context management, tool
-execution, output parsing, loop termination, error recovery) is hand-written.
-All 392 tests pass offline (no LLM API calls); the agent's core loop is fully
-deterministic and reproducible.
+一个**完全自研、不依赖任何 Agent 框架**的编码 Agent，核心是 ReAct 循环
+（Think → Act → Observe）。上下文管理、工具执行、输出解析、循环终止、错误恢复
+等每一块核心逻辑都手写实现。默认模型为 `agnes-3.0-flash`（OpenAI 兼容接口，
+可换 Agnes / DeepSeek / OpenAI / vLLM 等任意网关）。
 
-```
-CoderRepl / CLI
-  └─ Agent (ReAct Loop: Think → Act → Observe)
-       ├─ LLMClient          OpenAI-compatible API (Agnes / DeepSeek / OpenAI / vLLM…)
-       ├─ PolicyGate         ALLOW / LOG / DENY — code-level safety, not prompts
-       ├─ ContextManager     3-layer compression + per-message budget caps
-       ├─ AgentState/Memory  progress & long-term notes injected into system prompt
-       ├─ RecoveryStrategy   6 error types × differentiated recovery
-       ├─ Verifier           pytest + syntax + git-diff, mutation-gated retries
-       ├─ HookRegistry       AGENT_STARTED/ENDED, PRE/POST_TOOL_USE, TURN_STOPPED
-       ├─ SubagentRunner     4 read-only/specialist sub-agents
-       └─ ToolRegistry       5 core tools + 5 MCP tools + 5 Skills
-```
+> **392 个测试全部离线通过**（无需调用 LLM API）；Agent 核心循环完全确定、
+> 可复现——同任务、同 LLM、同工具环境下可逐位复现结果。
 
-## Install
+---
 
-```bash
-pip install -e ".[dev,ui]"
-```
+## 一、创新点（本项目与现有编码 Agent 的核心差异）
 
-Configure API access in a `.env` file at the project root (**never commit it**):
+在基础 ReAct 循环之上，`Coder` 内置 **7 项机制增强**。每一项都手写、有单测、
+可开关——你可以**全开**（默认 `full` 模式）或**全关**（纯 ReAct 基线）
+各跑一遍，直观看到差异。
 
-```bash
-OPENAI_API_KEY=sk-...
-OPENAI_BASE_URL=https://api.agnes-ai.cn/v1   # any OpenAI-compatible gateway
-MODEL_NAME=agnes-2.5-flash
-```
-
-## Usage
-
-### 1. Single-task CLI
-
-```bash
-# one-shot: agent runs the task and prints the final answer
-python -m coder_agent.main "Fix the bug in tasks/bug_fix/calculator.py"
-
-# installed console script (after pip install -e .)
-coder "Fix the bug in tasks/bug_fix/calculator.py" --mode full
-
-# useful flags
-python -m coder_agent.main --inspect        # show context budget & modes, exit
-python -m coder_agent.main --list-models    # show model configuration
-python -m coder_agent.main "task" \
-    --mode full \                           # goal | plan | dry-run | full
-    --max-tokens 8000 \                     # context compression budget
-    --keep-rounds 6 \                       # recent rounds kept verbatim
-    --token-budget 100000 \                 # wrap up & stop when exhausted
-    --session-output session.jsonl \        # journal messages for later --resume
-    --trace-output trace.jsonl              # JSONL execution trace
-```
-
-### 2. Interactive REPL (recommended)
-
-```bash
-python -m coder_agent.ui.cli.repl            # or: coder-repl (after pip install -e .)
-python -m coder_agent.ui.cli.repl --workspace path/to/project --mode goal
-```
-
-Type a task and press Enter to run the agent; progress prints live
-(`✓ read_file`, `── turn 2 ──`). Slash commands:
-
-| Command | Action |
-|---|---|
-| `/run <task>` | Run the agent on a task (auto-journaled to `~/.coder_sessions/`) |
-| `/resume <file> [instruction]` | Restore a journaled session and continue it |
-| `/sessions` | List journaled sessions |
-| `/mode <name>` | Switch mode — applies to the next `/run` |
-| `/status` | Context usage: tokens / budget / rounds |
-| `/tools` | List tools the model can call (core / MCP / Skills) |
-| `/compact` | Compress conversation history |
-| `/history` | Show recent messages |
-| `/trace` | Show execution metrics of the last run |
-| `/clear` | Reset display state |
-| `/help`, `/exit` | You guessed it |
-
-Paste into stdin (batch mode, no TTY needed):
-
-```bash
-echo "/run List python files and summarize" | python -m coder_agent.ui.cli.repl
-```
-
-### 3. Session resume — crash recovery
-
-Every `/run` (and every CLI run with `--session-output`) mirrors each message
-into an append-only JSONL journal. If the agent is interrupted (API drop,
-Ctrl+C, terminal closed), point a new session at the journal and it continues
-with the full prior conversation, state and file tracking rebuilt:
-
-```bash
-# CLI
-python -m coder_agent.main "task" --session-output session.jsonl   # ... interrupted!
-python -m coder_agent.main --resume session.jsonl                  # continue (default prompt)
-python -m coder_agent.main --resume session.jsonl "focus on the tests next"
-
-# REPL
-/run fix the calculator ...          # journaled automatically
-/resume ~/.coder_sessions/session_xxx.jsonl continue with the tests
-```
-
-The journal is chain-resumable: resuming appends to the same file, so an
-interrupted *recovery* can itself be recovered.
-
-### Execution modes
-
-| Mode | Behavior |
-|---|---|
-| `goal` | Normal execution (default) |
-| `plan` | Read-only: write/run tools are policy-denied |
-| `dry-run` | Writes are simulated and reported, nothing touches disk |
-| `full` | Relaxed policy denials (path safety still enforced) |
-
-### Demo replay mode — deterministic presentations without API
-
-录制的 SSE 事件序列存入 `~/.coder_replays/`，回放时完全离线、不依赖 LLM API。
-前端输入框输入命令即可使用：
-
-```
-/record D:/replays/demo.jsonl    # 录制本次运行
-<运行任务...>
-/replay                          # 回放最近一条 trace（无需 API）
-/replay D:/replays/demo.jsonl    # 回放指定 trace
-/health                          # 演示前检查 API 连通性与延迟
-```
-
-回放的时序与真实运行一致（按时间戳 sleep），前端 UI 零改动，所有 12 个
-hook 事件（AgentStarted / ToolStart / Tool / VerifierResult / Turn / Compress 等）
-都会正常渲染。答辩口径："回放用的就是 SessionJournal 机制本身"。
-
-## Design principles
-
-- **模型负责决策，程序负责约束** — the model decides *what* to do; PolicyGate,
-  path-safety checks and environment-variable isolation decide what it *may* do.
-- **Every step is observable** — JSONL trace, live progress, context inspector.
-- **Errors are recovery paths, not crashes** — format errors inject correction
-  prompts; API errors back off exponentially; verification failures only retry
-  when the workspace actually changed.
-- **Verification over self-report** — "done" means pytest/syntax/git-diff say so.
-
-## Innovations (创新点)
-
-Beyond the base ReAct loop, `Coder` ships **seven mechanism enhancements** that
-make it behave better on real tasks. Each is hand-written, unit-tested, and
-switchable — you can run the agent *with* all of them (the default `full`
-mode) or *without* (baseline) and watch the difference.
-
-| # | 创新点 | 实现 | 作用 |
+| # | 创新点 | 实现文件 | 解决了什么 |
 |---|---|---|---|
-| 1 | **Plan-Execute-Verify 编排器** | `planner.py` + `plan_executor.py` | 复杂任务先规划 → 子目标拓扑分层 → 并行执行 → 验证收敛，简单任务自动走 ReAct（零降智） |
-| 2 | **失败模式库 + 策略轮换 + 跨会话知识** | `failure_patterns.py` | 同类失败命令连败时结构化分类、轮换修复策略、沉淀为跨会话知识库，避免模型在同一失败上反复烧步数 |
-| 3 | **消息分级 + 上下文保护** | `message_grading.py` + `context.py` | 按重要性分级（CRITICAL/HIGH/LOW），窗口满时优先保留关键消息，长任务不"失忆" |
-| 4 | **记忆自动整理（重要性驱逐）** | `memory_curator.py` + `memory_tool.py` | 记忆去重 + 重要性打分 + 容量上限，自动淘汰低价值条目 |
-| 5 | **工具失败降级路由** | `tool_fallback.py` | 某工具连续失败 N 次后，自动给出"换一种工具/命令"的降级建议 |
-| 6 | **自适应工具 schema 路由** | `tool_routing.py` | 按任务阶段（探索/修改/验证/文档）动态裁剪暴露给模型的工具 schema，省 token |
-| 7 | **规划模板跨会话学习** | `planner.py`（`remember_plan` / `recall_template`） | 成功的计划沉淀为模板，相似任务免 LLM 规划调用，越用越快 |
+| 1 | **Plan-Execute-Verify 编排器** | `planner.py` + `plan_executor.py` | 复杂任务先规划 → 子目标拓扑分层 → 并行执行 → 验证收敛；简单任务自动降级走 ReAct，**零降智** |
+| 2 | **失败模式库 + 策略轮换 + 跨会话知识** | `failure_patterns.py` | 同类失败命令连败时自动**分类**、**轮换修复策略**、沉淀为**跨会话知识库**，避免模型在同一失败上反复烧步数 |
+| 3 | **消息分级 + 上下文保护** | `message_grading.py` + `context.py` | 消息按重要性分级（CRITICAL/HIGH/LOW），上下文窗口满时**优先保留关键消息**，长任务不失忆 |
+| 4 | **记忆自动整理（重要性驱逐）** | `memory_curator.py` + `memory_tool.py` | 记忆去重 + 重要性打分 + 容量上限，**自动淘汰**低价值条目 |
+| 5 | **工具失败降级路由** | `tool_fallback.py` | 某工具连续失败 N 次后，自动给出"换一种工具 / 命令"的**降级建议** |
+| 6 | **自适应工具 schema 路由** | `tool_routing.py` | 按任务阶段（探索/修改/验证/文档）**动态裁剪**暴露给模型的工具 schema，省 token |
+| 7 | **规划模板跨会话学习** | `planner.py`（`remember_plan` / `recall_template`） | 成功计划沉淀为**模板**，相似任务免 LLM 规划调用，**越用越快** |
 
-**为什么这些是创新而不是花架子**：每一项都有独立单测 + 一条端到端证据。
-跨实现对照实验（`tests/cross_agent_benchmark.py` + `tests/cross_agent_report.md`）
-把 `Coder`（全增强 vs 纯 ReAct 基线）和 **3 个真实开源 agent 真身**
+### 为什么这些是创新而非花架子：三条可复现证据
+
+**① 跨实现对照**（`tests/cross_agent_benchmark.py` + `tests/cross_agent_report.md`）
+把 `Coder`（全增强 vs 纯 ReAct 基线）与 **3 个真实开源 Agent 真身**
 （mini-swe-agent / OneCode / smolagents）放在**同一任务、同一确定性 LLM、
 同一工具环境**下跑，模型变量被完全控制，差异全部来自框架机制：
 
@@ -175,14 +41,179 @@ mode) or *without* (baseline) and watch the difference.
 | coder_agent(纯 ReAct 基线) | 8 | 3 | 0 |
 | **coder_agent(全增强)** | **8** | **3** | **1** |
 
-结论：全增强版在步数/失败数上与基线及三个开源真身**持平或更优**，且独有
-"失败信号结构化 + 策略轮换 + 工具降级路由"的框架主动干预——这是这些开源 agent
-核心 loop 不具备的方法层差异。端到端真实任务基准（`tests/e2e_full_enhanced_bugfix.py`）
-再以确定性 LLM 驱动、地面真值验证（代码行为正确 + pytest 全绿）确认 7 项增强
-确实带来"效果很好"的可复现结果。
+全增强版在**步数/失败数**上与基线及三个开源真身**持平或更优**，且独有
+"失败信号结构化 + 策略轮换 + 工具降级路由"的**框架主动干预**——这是这些开源
+Agent 核心循环不具备的方法层差异。
+（对照范围限定：商业闭源 Agent 如 Claude Code / Cursor / Copilot 核心循环
+不可审计，本对照不对其做可达/不可达断言。）
 
-## Testing
+**② 端到端真实任务**（`tests/e2e_full_enhanced_bugfix.py`）
+全增强 Agent 用确定性 LLM 驱动，修一个**真实多 bug 任务**（`calculator.py`
+同时有"除零不抛异常"+"整数除法"两个 bug），并**独立进程做地面真值验证**
+（代码行为正确 + `pytest` 全绿）。证明 7 项增强确实带来"效果很好"。
+
+**③ 全量回归**：`tests/` + `coder_agent/` 共 **392 个测试离线通过**，
+每项增强各有独立单测。
+
+---
+
+## 二、架构
+
+```
+CLI / REPL / Web UI
+  └─ Agent（ReAct 循环：Think → Act → Observe）
+       ├─ LLMClient          OpenAI 兼容 API（Agnes / DeepSeek / OpenAI / vLLM…）
+       │                     + urllib 传输层回退（网络不稳时降级）
+       ├─ Planner/PlanExec   创新点 1：Plan-Execute-Verify 编排器
+       ├─ FailureLibrary     创新点 2：失败模式库 + 策略轮换 + 跨会话知识
+       ├─ MessageGrading     创新点 3：消息分级 + 上下文保护
+       ├─ MemoryCurator      创新点 4：记忆自动整理（重要性驱逐）
+       ├─ ToolFallbackRouter 创新点 5：工具失败降级路由
+       ├─ ToolRouting        创新点 6：自适应工具 schema 路由
+       ├─ PolicyGate         ALLOW / LOG / DENY —— 代码级安全，不靠 prompt
+       ├─ ContextManager     3 层压缩 + 逐消息预算上限
+       ├─ Verifier           pytest + 语法 + git-diff，变更门控重试
+       ├─ HookRegistry       AGENT_STARTED/ENDED、PRE/POST_TOOL_USE、TURN_STOPPED
+       ├─ SubagentRunner     4 个只读 / 专家子 Agent
+       └─ ToolRegistry       5 核心工具 + 5 MCP 工具 + 5 Skills
+```
+
+---
+
+## 三、安装
 
 ```bash
-python -m pytest tests/ -q     # 392 tests, ~1.5 min, no API calls needed
+pip install -e ".[dev,ui]"
 ```
+
+在项目根目录的 `.env` 中配置 API 访问（**切勿提交**该文件）：
+
+```bash
+OPENAI_API_KEY=sk-...
+OPENAI_BASE_URL=https://api.agnes-ai.cn/v1   # 任意 OpenAI 兼容网关
+MODEL_NAME=agnes-3.0-flash
+```
+
+---
+
+## 四、使用
+
+### 1. 单任务 CLI
+
+```bash
+# 一次性：跑任务并打印最终答案
+python -m coder_agent.main "Fix the bug in tasks/bug_fix/calculator.py"
+
+# 安装后的控制台脚本（pip install -e . 之后）
+coder "Fix the bug in tasks/bug_fix/calculator.py" --mode full
+
+# 常用参数
+python -m coder_agent.main --inspect        # 查看上下文预算与模式后退出
+python -m coder_agent.main --list-models    # 查看模型配置
+python -m coder_agent.main "task" \
+    --mode full \                           # goal | plan | dry-run | full
+    --max-tokens 8000 \                     # 上下文压缩预算
+    --keep-rounds 6 \                       # 最近 N 轮原样保留
+    --token-budget 100000 \                 # 预算耗尽时收尾并停止
+    --session-output session.jsonl \        # 记录会话供 --resume 使用
+    --trace-output trace.jsonl              # JSONL 执行轨迹
+```
+
+### 2. 交互 REPL（推荐）
+
+```bash
+python -m coder_agent.ui.cli.repl            # 或：coder-repl（pip install -e . 后）
+python -m coder_agent.ui.cli.repl --workspace path/to/project --mode goal
+```
+
+输入任务回车即跑，进度实时打印（`✓ read_file`、`── turn 2 ──`）。斜杠命令：
+
+| 命令 | 作用 |
+|---|---|
+| `/run <task>` | 对任务跑 Agent（自动记录到 `~/.coder_sessions/`） |
+| `/resume <file> [instruction]` | 恢复已记录的会话并继续 |
+| `/sessions` | 列出已记录会话 |
+| `/mode <name>` | 切换模式（对下一个 `/run` 生效） |
+| `/status` | 上下文用量：token / 预算 / 轮数 |
+| `/tools` | 列出模型可调用工具（核心 / MCP / Skills） |
+| `/compact` | 压缩对话历史 |
+| `/history` | 查看最近消息 |
+| `/trace` | 查看上次运行的执行指标 |
+| `/clear` | 重置显示状态 |
+| `/help`、`/exit` | 略 |
+
+粘贴到 stdin（批处理，无需 TTY）：
+
+```bash
+echo "/run List python files and summarize" | python -m coder_agent.ui.cli.repl
+```
+
+### 3. 会话恢复 —— 崩溃续跑
+
+每次 `/run`（及带 `--session-output` 的 CLI 运行）都会把每条消息镜像进
+**追加式 JSONL 日志**。Agent 被中断（API 掉线、Ctrl+C、终端关闭）后，
+让新会话指向该日志即可带着完整的既往对话、状态、文件追踪继续：
+
+```bash
+# CLI
+python -m coder_agent.main "task" --session-output session.jsonl   # …被中断！
+python -m coder_agent.main --resume session.jsonl                  # 续跑（默认提示）
+python -m coder_agent.main --resume session.jsonl "focus on the tests next"
+
+# REPL
+/run fix the calculator ...          # 自动记录
+/resume ~/.coder_sessions/session_xxx.jsonl continue with the tests
+```
+
+日志可**链式续跑**：续跑时追加到同一文件，所以一次中断的"恢复"本身也能被恢复。
+
+### 执行模式
+
+| 模式 | 行为 |
+|---|---|
+| `goal` | 正常执行（默认） |
+| `plan` | 只读：写/跑类工具被策略拒绝 |
+| `dry-run` | 写操作只模拟并报告，不落盘 |
+| `full` | 放宽策略拒绝（路径安全仍强制） |
+
+### 演示回放模式 —— 无需 API 的确定性演示
+
+录制的 SSE 事件序列存入 `~/.coder_replays/`，回放完全离线、不依赖 LLM API。
+前端输入框输入命令即可：
+
+```
+/record D:/replays/demo.jsonl    # 录制本次运行
+<运行任务...>
+/replay                          # 回放最近一条 trace（无需 API）
+/replay D:/replays/demo.jsonl    # 回放指定 trace
+/health                          # 演示前检查 API 连通性与延迟
+```
+
+回放的时序与真实运行一致（按时间戳 sleep），前端 UI 零改动，所有 12 个
+hook 事件（AgentStarted / ToolStart / Tool / VerifierResult / Turn / Compress 等）
+都会正常渲染。答辩口径："回放用的就是 SessionJournal 机制本身。"
+
+---
+
+## 五、设计原则
+
+- **模型负责决策，程序负责约束** —— 模型决定"做什么"；PolicyGate、路径
+  安全检查与环境变量隔离决定它"可以做什么"。
+- **每一步可观测** —— JSONL 轨迹、实时进度、上下文检查器。
+- **错误是恢复路径而非崩溃** —— 格式错误注入纠正 prompt；API 错误指数
+  退避；验证失败仅当工作区确有变更才重试。
+- **验证优先于自述** —— "完成"由 pytest / 语法 / git-diff 说了算。
+
+---
+
+## 六、测试
+
+```bash
+python -m pytest tests/ -q     # 392 个测试，约 1.5 分钟，无需 API 调用
+```
+
+关键入口：
+- `tests/cross_agent_benchmark.py` —— 跨实现对照（含 3 个开源 Agent 真身）
+- `tests/cross_agent_report.md` —— 对照量化报告（自动生成）
+- `tests/e2e_full_enhanced_bugfix.py` —— 全增强端到端真实任务基准
+- `tests/test_e2e.py` —— 基础 ReAct 闭环端到端
