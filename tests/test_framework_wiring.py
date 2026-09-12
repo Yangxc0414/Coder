@@ -65,8 +65,12 @@ class TestDefaultRegistry:
 
     def test_extension_tool_count(self, tmp_path: Path):
         reg = create_default_registry(tmp_path, AgentMode.GOAL, with_extensions=True)
-        # 5 core + 5 mcp + 17 skills
-        assert len(reg.list_names()) == 27
+        # 5 core + 2 install + 5 mcp + 17 skills = 29
+        # （install_skill / install_mcp 是 agent 自主下载扩展的元工具；
+        #  若 ~/.coder_extensions/ 有已装扩展还会再加，故断言下限）
+        assert len(reg.list_names()) >= 29
+        assert "install_skill" in reg.list_names()
+        assert "install_mcp" in reg.list_names()
 
     def test_skill_executes_through_registry(self, tmp_path: Path):
         reg = create_default_registry(tmp_path, AgentMode.GOAL)

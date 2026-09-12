@@ -214,6 +214,16 @@ class Agent:
             memory_tool = MemoryTool(self.memory, self.workspace)
             memory_tool.load_from_disk()
             self.registry.register(memory_tool)
+
+        # install tools — 模型在对话中自主下载并注册 Skill / MCP（GitHub 仓库）。
+        # 对齐 task/memory 的 registry 共享守护模式：共享 registry 不重复注册。
+        # 装完即时注册进 self.registry（本会话可用）；持久化走 installer 的
+        # ~/.coder_extensions/，新会话由 create_default_registry 复用。
+        from coder_agent.tools.install_tools import InstallSkillTool, InstallMcpTool
+        for _inst in (InstallSkillTool(self.registry, self.workspace, self.mode),
+                      InstallMcpTool(self.registry, self.workspace, self.mode)):
+            if _inst.name not in self.registry:
+                self.registry.register(_inst)
         # 运行结束自动整理记忆（跨会话学习：去重 + 按重要性淘汰）
         try:
             mt = self.registry.get("memory")
