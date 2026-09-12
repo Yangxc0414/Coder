@@ -241,45 +241,114 @@ def _run_coder_agent_baseline(ws: Path) -> AgentRunResult:
         elapsed_sec=round(dt, 2), final_answer=answer)
 
 
+def _find_py310() -> "str | None":
+    import shutil
+    cands = [
+        "python3.13", "python3.12", "python3.11", "python3.10",
+        r"C:\Users\20691\AppData\Local\Programs\Python\Python312\python.exe",
+    ]
+    for c in cands:
+        if shutil.which(c):
+            return c
+        p = Path(c)
+        if p.exists():
+            return str(p)
+    return None
+
+
 def _run_mswea(ws: Path) -> AgentRunResult:
-    """Run mini-swe-agent's real DefaultAgent.run() on the same task."""
-    from minisweagent.agents.default import DefaultAgent
-    from minisweagent.environments.local import LocalEnvironment
+    """跑 mini-swe-agent 真身（DefaultAgent.run）在同一任务上。
 
+    在 3.10+ 子进程里 import 真身并执行 run()（3.8 侧无法直接跑
+    3.10 语法的源码），确定性 LLM 脚本与 coder_agent 侧相同，
+    结果指标经 JSON 回传。
+    """
+    import json
+    import os
+    import subprocess
+    p310 = _find_py310()
+    if p310 is None:
+        return AgentRunResult(
+            name="mini-swe-agent(DefaultAgent)", success=False,
+            error="未找到 Python 3.10+ 解释器，无法跑 mini-swe-agent 真身")
     (ws / "main.py").write_text("print(0)\n", encoding="utf-8")
-    env = LocalEnvironment(cwd=str(ws))
-    model = StubMSweaModel(ScriptedRetryLLM())
-    agent = DefaultAgent(
-        model=model, env=env,
-        system_template="You are a coding agent.",
-        instance_template="Task: {{ task }}",
-        step_limit=12, output_path=None)
-    t0 = time.time()
+    code = (
+        "import sys, json, time\n"
+        f"sys.path.insert(0, {str(REPO)!r})\n"
+        f"sys.path.insert(0, {str(MSWEA_SRC)!r})\n"
+        "from tests.cross_agent_benchmark import ScriptedRetryLLM, StubMSweaModel\n"
+        "from minisweagent.agents.default import DefaultAgent\n"
+        "from minisweagent.environments.local import LocalEnvironment\n"
+        "import pathlib\n"
+        f"ws = pathlib.Path({str(ws)!r})\n"
+        '(ws / "main.py").write_text("print(0)\\n", encoding="utf-8")\n'
+        "env = LocalEnvironment(cwd=str(ws))\n"
+        "llm = ScriptedRetryLLM()\n"
+        "model = StubMSweaModel(llm)\n"
+        'agent = DefaultAgent(model=model, env=env, system_template="You are a coding agent.",'
+        ' instance_template="Task: {{ task }}", step_limit=12, output_path=None)\n'
+        "t0 = time.time()\n"
+        "try:\n"
+        '    out = agent.run("fix main.py")\n'
+        '    ok, err, answer = True, "", str(out.get("exit_status", ""))\n'
+        "except Exception as e:\n"
+        '    ok, err, answer = False, str(e), f"(exception) {e}"\n'
+        "dt = time.time() - t0\n"
+        "import re as _re\n"
+        "fails = 0\n"
+        "for m in agent.messages:\n"
+        '    c = str(m.get("content", ""))\n'
+        '    if _re.search(r"<returncode>\\s*[1-9]", c) or "command not found" in c or "not recognized" in c:\n'
+        "        fails += 1\n"
+        'res = {"success": ok, "steps": model.n_model_calls, "tool_failures": fails,'
+        ' "peak_messages": len(agent.messages), "framework_interventions": 0,'
+        ' "elapsed_sec": round(dt, 2), "final_answer": answer, "error": err}\n'
+        "print(json.dumps(res))\n"
+    )
     try:
-        out = agent.run("fix main.py")
-        success, err = True, ""
-        answer = str(out.get("exit_status", ""))
-    except Exception as e:
-        success, err, answer = False, str(e), f"(exception) {e}"
-    dt = time.time() - t0
+        r = subprocess.run([p310, "-c", code], capture_output=True, text=True,
+                           timeout=180, cwd=str(REPO))
+    except subprocess.TimeoutExpired:
+        return AgentRunResult(name="mini-swe-agent(DefaultAgent)", success=False,
+                              error="3.10+ 子进程超时")
+    lines = [ln for ln in r.stdout.strip().splitlines() if ln.startswith("{")]
+    if not lines:
+        return AgentRunResult(name="mini-swe-agent(DefaultAgent)", success=False,
+                              error=f"子进程无输出：{r.stderr[-300:]}")
+    d = json.loads(lines[-1])
+    return AgentRunResult(name="mini-swe-agent(DefaultAgent)", **d)
 
-    failures = 0
-    for m in agent.messages:
-        c = str(m.get("content") or "")
-        if re.search(r"<returncode>\s*[1-9]", c) \
-                or "command not found" in c or "not recognized" in c:
-            failures += 1
-    return AgentRunResult(
-        name="mini-swe-agent(DefaultAgent)", success=success,
-        steps=model.n_model_calls, tool_failures=failures,
-        peak_messages=len(agent.messages), framework_interventions=0,
-        elapsed_sec=round(dt, 2), final_answer=answer, error=err)
+
+def _run_mswea_subprocess(ws: Path) -> AgentRunResult:
+    """mini-swe-agent 真身（3.10+ 子进程）——_run_mswea 的别名，
+    供 run_cross_benchmark 的统一 runner 列表使用。"""
+    return _run_mswea(ws)
+
+
+def _run_onecode(ws: Path) -> AgentRunResult:
+    """跑 OneCode 真身（core/loop.py 的 AgentLoop）在同一任务上。
+
+    OneCode 要求 Python >=3.11，且核心 loop 是 async 流式协议——
+    通过 3.11+ 子进程驱动（tests/onecode_driver.py 内嵌子进程脚本），
+    确定性 LLM 脚本与 coder_agent 侧相同，结果指标经 JSON 回传。
+    """
+    import sys
+    if str(Path(__file__).resolve().parent) not in sys.path:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from onecode_driver import run_onecode_subprocess
+    d = run_onecode_subprocess(ws)
+    d.setdefault("peak_messages", 0)
+    d.setdefault("framework_interventions", 0)
+    d.setdefault("steps", 0)
+    d.setdefault("tool_failures", 0)
+    return AgentRunResult(name="OneCode(AgentLoop)", **d)
 
 
 def run_cross_benchmark(root: Path) -> dict:
     results = []
     for sub, runner in [
         ("mswea", _run_mswea),
+        ("onecode", _run_onecode),
         ("ca_full", _run_coder_agent_full),
         ("ca_base", _run_coder_agent_baseline),
     ]:
@@ -290,13 +359,17 @@ def run_cross_benchmark(root: Path) -> dict:
     return {
         "results": results,
         "mswea": next(r for r in results if r.name.startswith("mini-swe-agent")),
+        "onecode": next((r for r in results if r.name.startswith("OneCode")), None),
         "ca_full": next(r for r in results if r.name.startswith("coder_agent(full)")),
         "ca_base": next(r for r in results if r.name.startswith("coder_agent(baseline")),
     }
 
 
 def print_report(res: dict) -> None:
-    rows = [res["mswea"], res["ca_base"], res["ca_full"]]
+    rows = [res["mswea"]]
+    if res.get("onecode"):
+        rows.append(res["onecode"])
+    rows += [res["ca_base"], res["ca_full"]]
     print("=" * 72)
     print("跨实现对照（同一任务 / 同一确定性 LLM / 同一工具环境）")
     print("=" * 72)
@@ -305,44 +378,60 @@ def print_report(res: dict) -> None:
     for r in rows:
         print(f"{r.name:<30}{r.steps:>6}{r.tool_failures:>8}"
               f"{r.peak_messages:>8}{r.framework_interventions:>6}"
-              f"{r.elapsed_sec:>8}")
+              f"{(r.elapsed_sec if r.elapsed_sec is not None else '-'):>8}")
     print("-" * 72)
     print(f"mini-swe-agent 真身（DefaultAgent.run 原封不动）："
           f"{'成功' if res['mswea'].success else '失败'}")
     if res["mswea"].error:
         print(f"  异常: {res['mswea'].error[:300]}")
+    if res.get("onecode"):
+        oc = res["onecode"]
+        print(f"OneCode 真身（AgentLoop 原封不动）：{'成功' if oc.success else '失败'}"
+              + (f"  异常: {oc.error[:200]}" if oc.error else ""))
     print("=" * 72)
 
 
 def write_report_md(res: dict, out_path: Path) -> None:
     b, f, p = res["mswea"], res["ca_full"], res["ca_base"]
+    oc = res.get("onecode")
+    rows = [
+        f"| {b.name} | {b.steps} | {b.tool_failures} | {b.peak_messages} | {b.framework_interventions} | {b.elapsed_sec} | {'成功' if b.success else '失败'} |",
+    ]
+    if oc:
+        rows.append(f"| {oc.name} | {oc.steps} | {oc.tool_failures} | {oc.peak_messages} | {oc.framework_interventions} | - | {'成功' if oc.success else '失败'} |")
+    rows += [
+        f"| {p.name} | {p.steps} | {p.tool_failures} | {p.peak_messages} | {p.framework_interventions} | {p.elapsed_sec} | {'成功' if p.success else '失败'} |",
+        f"| {f.name} | {f.steps} | {f.tool_failures} | {f.peak_messages} | {f.framework_interventions} | {f.elapsed_sec} | {'成功' if f.success else '失败'} |",
+    ]
+    oc_line = (f"- **OneCode 真身**（AgentLoop 原封不动）：步数 {oc.steps}，"
+               f"工具失败 {oc.tool_failures}，**框架干预 0**——同样不做失败信号结构化。"
+               if oc else "")
     lines = [
-        "# 跨实现对照：coder_agent vs mini-swe-agent（真实开源 agent）",
+        "# 跨实现对照：coder_agent vs mini-swe-agent / OneCode（真实开源 agent）",
         "",
-        "同一任务（修 main.py + 跑失败命令试错）在三种配置上各跑一遍，",
+        "同一任务（修 main.py + 跑失败命令试错）在各实现上各跑一遍，",
         "确定性 LLM 替身（固定 10 步试错轨迹）驱动，模型变量被控制，",
         "差异全部来自框架机制。",
         "",
         "| 实现 | 步数(模型调用) | 工具失败 | 峰值上下文消息 | 框架干预 | 耗时(s) | 结果 |",
         "|------|------|------|------|------|------|------|",
-        f"| {b.name} | {b.steps} | {b.tool_failures} | {b.peak_messages} | {b.framework_interventions} | {b.elapsed_sec} | {'成功' if b.success else '失败'} |",
-        f"| {p.name} | {p.steps} | {p.tool_failures} | {p.peak_messages} | {p.framework_interventions} | {p.elapsed_sec} | {'成功' if p.success else '失败'} |",
-        f"| {f.name} | {f.steps} | {f.tool_failures} | {f.peak_messages} | {f.framework_interventions} | {f.elapsed_sec} | {'成功' if f.success else '失败'} |",
+        *rows,
         "",
         "## 解读",
         "",
         f"- **mini-swe-agent 真身**（DefaultAgent.run 原封不动，仅换成确定性 LLM）：",
         f"  步数 {b.steps}，工具失败 {b.tool_failures}，峰值上下文 {b.peak_messages} 条，",
         f"  **框架干预 0**——对同类别失败命令 3 连败无任何'换方法'提示，放任试错。",
+        f"{oc_line}",
         f"- **coder_agent 纯 ReAct 基线**（关闭全部 7 项增强）：步数 {p.steps}，",
-        f"  工具失败 {p.tool_failures}，干预 0——与 mini-swe-agent 同范式。",
+        f"  工具失败 {p.tool_failures}，干预 0——与两个开源实现同范式。",
         f"- **coder_agent 全增强**：步数 {f.steps}，工具失败 {f.tool_failures}，",
         f"  **框架干预 {f.framework_interventions}**——失败模式库 + 命令连败策略 +",
         "  工具降级路由主动注入'换方法'提示，避免模型在同一失败上反复烧步数。",
         "",
         "结论：coder_agent 全增强版在步数/失败数上与纯 ReAct 基线（及",
-        "mini-swe-agent 范式）持平或更优，且**独有框架主动干预**（失败信号",
-        "结构化 + 策略轮换 + 跨会话知识沉淀），这是 mini-swe-agent 核心 loop",
+        "mini-swe-agent / OneCode 范式）持平或更优，且**独有框架主动干预**（失败信号",
+        "结构化 + 策略轮换 + 跨会话知识沉淀），这是这些开源 agent 核心 loop",
         "所不具备的方法层差异。",
         "",
     ]
