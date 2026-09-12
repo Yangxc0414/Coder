@@ -401,9 +401,7 @@ def api_session(file: str = ""):
     if not file:
         raise HTTPException(status_code=400, detail="file 参数不能为空")
     p = Path(file)
-    try:
-        p.resolve().relative_to(session_dir.resolve())
-    except ValueError:
+    if not _within_dir(p, session_dir):
         raise HTTPException(status_code=403, detail="路径越界")
     if not p.is_file():
         raise HTTPException(status_code=404, detail="会话不存在")
@@ -492,21 +490,53 @@ def _session_stats(messages: list[dict]) -> dict:
     }
 
 
-@app.delete("/api/session")
-def api_session_delete(file: str = ""):
+def _within_dir(p: Path, root: Path) -> bool:
+    """p 是否位于 root 目录内（Windows 大小写/UNC 兼容）。
+
+    Path.resolve() 在 Windows 上可能返回 //?/C:/... UNC 形式，
+    直接 relative_to 会因盘符/大小写差异误判越界。这里统一用
+    os.path.normcase + normpath 规范化，再前缀比对。
+    """
+    import os
+
+    import string
+    _drives = set(string.ascii_uppercase)
+
+    def _norm(x: Path) -> str:
+        s = str(x)
+        # Windows 下把 /C/... 或 /c/...（POSIX 形式）转成 C:\...，
+        # 保证与 Path.home()（Windows 盘符形式）同一坐标系
+        if os.name == "nt" and len(s) >= 3 and s[0] in "/\\" and s[1].upper() in _drives and s[2] in "/\\" :
+            s = s[1].upper() + ":" + s[2:]
+        s = os.path.normcase(os.path.normpath(s))
+        if s.startswith("//?/"):
+            s = s[4:]
+        return s
+
+    np = _norm(p)
+    nr = _norm(root)
+    prefix = nr.rstrip(os.sep) + os.sep
+    return np.startswith(prefix) or np == nr
+
+
+def _delete_session(file: str) -> dict:
     """删除一个历史会话文件（仅供 UI 会话管理）。"""
     session_dir = Path.home() / ".coder_sessions"
     if not file:
         raise HTTPException(status_code=400, detail="file 参数不能为空")
     p = Path(file)
-    try:
-        p.resolve().relative_to(session_dir.resolve())
-    except ValueError:
+    if not _within_dir(p, session_dir):
         raise HTTPException(status_code=403, detail="路径越界")
     if not p.is_file():
         raise HTTPException(status_code=404, detail="会话不存在")
     p.unlink(missing_ok=True)
     return {"ok": True, "file": str(p)}
+
+
+@app.delete("/api/session")
+def api_session_delete(file: str = ""):
+    """删除一个历史会话文件（仅供 UI 会话管理）。"""
+    return _delete_session(file)
 
 
 @app.get("/api/commands")
