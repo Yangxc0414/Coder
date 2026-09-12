@@ -6,11 +6,11 @@
 
 | 实现 | 步数(模型调用) | 工具失败 | 峰值上下文消息 | 框架干预 | 耗时(s) | 结果 |
 |------|------|------|------|------|------|------|
-| mini-swe-agent(DefaultAgent) | 12 | 4 | 27 | 0 | 2.19 | 成功 |
-| OneCode(AgentLoop) | 9 | 3 | 18 | 0 | 0.27 | 成功 |
-| smolagents(CodeAgent) | 9 | 3 | 30 | 0 | 0.21 | 成功 |
-| coder_agent(baseline=纯ReAct) | 8 | 3 | 20 | 0 | 0.2 | 成功 |
-| coder_agent(full) | 8 | 3 | 20 | 1 | 1.4 | 成功 |
+| mini-swe-agent(DefaultAgent) | 12 | 4 | 27 | 0 | 1.71 | 成功 |
+| OneCode(AgentLoop) | 9 | 3 | 18 | 0 | 0.28 | 成功 |
+| smolagents(CodeAgent) | 9 | 3 | 30 | 0 | 0.29 | 成功 |
+| coder_agent(baseline=纯ReAct) | 8 | 3 | 20 | 0 | 0.19 | 成功 |
+| coder_agent(full) | 8 | 3 | 20 | 1 | 1.14 | 成功 |
 
 ## 解读
 
@@ -29,3 +29,14 @@
 mini-swe-agent / OneCode / smolagents 范式）持平或更优，且**独有框架主动干预**
 （失败信号结构化 + 策略轮换 + 跨会话知识沉淀），这是这些开源 agent 核心 loop
 所不具备的方法层差异。
+
+## 对照范围与边界声明
+
+本对照覆盖 3 个主流**开源** coding agent 真身（mini-swe-agent / OneCode /
+smolagents），用确定性 LLM 替身控制模型变量、同任务同工具环境，差异可归因
+到框架机制。结论限定为：**在核心机制层面超过/对齐主流开源 coding agent**，
+且 coder_agent 独有失败信号结构化的框架主动干预。
+
+市面**商业闭源** agent（Claude Code / Cursor / GitHub Copilot 等）未开源其
+核心 loop，无法在其真身上做同任务对照，本对照不对其做可达/不可达的
+方法层断言；如需覆盖须另行获取其可审计的 agent loop。
