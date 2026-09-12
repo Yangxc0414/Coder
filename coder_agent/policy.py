@@ -43,7 +43,12 @@ class PolicyGate:
     # memory: writes only to .coder_memory.md (own bookkeeping)
     # task: delegation — severity depends on the child subagent; allowed
     #       with logging, and PLAN mode still blocks it (children may write)
-    LOG_LIST = frozenset({"write_file", "memory", "task"})
+    # install_skill/install_mcp: agent 自主下载扩展（git clone 白名单域名到
+    #       ~/.coder_extensions/，不进工作区/git）；带日志审计，PLAN 模式只读会拦截
+    LOG_LIST = frozenset({
+        "write_file", "memory", "task",
+        "install_skill", "install_mcp",
+    })
 
     # Dangerous command substrings (checked inside run_command).
     # Single source of truth: RunCommandTool.DANGEROUS_PATTERNS — the two
