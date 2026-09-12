@@ -1345,10 +1345,16 @@ async function abort() {
 
 function handleSubmit() {
   const task = inputEl.value.trim();
-  if (task) {
-    if (task.startsWith("/")) execLine(task);
-    else submitTask(task);
+  if (!task) return;
+  if (task.startsWith("/")) {
+    execLine(task);
+    return;
   }
+  // 运行中提交 → 入队列。
+  // 注意：#send 按钮在运行时是 disabled 的（防重复提交），
+  // 只有 Enter 快捷键能触发本路径，所以这里必须走 submitTask 的
+  // 队列分支（tab.running 时 push 到 tab.queue），否则消息会被静默丢弃。
+  submitTask(task);
 }
 
 /* ═══════════ 历史会话（作用于当前 tab） ═══════════ */
