@@ -539,6 +539,8 @@ class RunManager:
                 category = "mcp"
                 if name in disabled_mcp:
                     continue
+            elif name in ("install_skill", "install_mcp"):
+                category = "core"  # 下载/安装扩展的元工具，归核心
             else:
                 category = "core"
             counts[category] += 1
@@ -594,6 +596,23 @@ class RunManager:
                 "parameters": s.parameters,
                 "allowed_tools": list(getattr(s, "allowed_tools", ()) or ()),
                 "enabled": s.name not in disabled_skills,
+                "source": "builtin",
+                "repo_url": None,
+            })
+        # 追加已安装 skill（~/.coder_extensions/，跨会话保留）
+        from coder_agent.extensions.installer import ExtensionInstaller
+        installed = ExtensionInstaller().list_installed()
+        for s in installed.get("skills", []):
+            skills.append({
+                "name": s.name,
+                "display": s.name.replace("skill_", ""),
+                "description": (s.description or "").strip()[:150],
+                "when_to_use": (getattr(s, "_when_to_use", "") or "").strip()[:100],
+                "parameters": s.parameters,
+                "allowed_tools": list(getattr(s, "allowed_tools", ()) or ()),
+                "enabled": s.name not in disabled_skills,
+                "source": "installed",
+                "repo_url": None,  # 真实 URL 见 manifest；列表层不重读
             })
         mcp: dict[str, list[dict]] = {}
         for t in create_builtin_mcp_tools(self.workspace):
@@ -605,6 +624,20 @@ class RunManager:
                     f"[MCP: {server}] ", "")[:150],
                 "parameters": t.parameters,
                 "enabled": t.name not in disabled_mcp,
+                "source": "builtin",
+                "repo_url": None,
+            })
+        for t in installed.get("mcp", []):
+            server = getattr(t, "_server_name", "installed")
+            mcp.setdefault(server, []).append({
+                "name": t.name,
+                "display": t.name.replace(f"mcp_{server}_", ""),
+                "description": (t.description or "").replace(
+                    f"[MCP: {server}] ", "")[:150],
+                "parameters": t.parameters,
+                "enabled": t.name not in disabled_mcp,
+                "source": "installed",
+                "repo_url": None,
             })
         # 子代理（任务委托编排，展示型）
         from coder_agent.extensions.subagents import get_builtin_subagents
