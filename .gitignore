@@ -23,3 +23,30 @@ env/
 .coder_bg/
 .coder_memory.md
 trace_*.jsonl
+
+# 本地参考仓库（不入库）
+MyArxiv/
+OneCode/
+aider/
+cline/
+continue/
+goose/
+mini-swe-agent/
+openhands/
+plandex/
+qwen-code/
+smolagents-src/
+my-pi-agent/
+swe-agent/
+node_modules/
+_onecode_child.py
+
+# 运行日志 / 回放 / 测试截图 / 临时产物
+.coder_server.log
+.onecode/
+.coder_memory_meta.json
+.coder_replays/
+gui-test-screenshots/
+frontend_screenshot.png
+frontend_flow_final.png
+calculator.html
