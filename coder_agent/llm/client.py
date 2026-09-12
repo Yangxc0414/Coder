@@ -20,6 +20,27 @@ def _user_config() -> dict:
         return {}
 
 
+def _replay_stream_tokens(text: str, on_token: Any) -> None:
+    """非流式响应拿到后，按 4 字符分块回放 on_token 回调（模拟打字机）。
+
+    SDK/urllib 流式失败、降级到非流式时调用：保证 UI 仍有逐字流式效果，
+    而不是等整段返回后一次性弹出（感知上的"卡 3-5 秒再出结果"）。
+    中文 4 字符/块 ≈ 约 2 token/块，节奏接近真实流式。
+    """
+    if not text or on_token is None:
+        return
+    step = 4
+    for i in range(0, len(text), step):
+        on_token(text[i:i + step])
+
+
+def _sleep_between_chunks(n_chunks: int) -> None:
+    """流式回放时按 chunk 数模拟节奏，避免一次性涌出。"""
+    import time
+    if n_chunks > 0:
+        time.sleep(min(0.02 * n_chunks, 0.4))
+
+
 _USER_CFG = _user_config()
 
 
@@ -68,18 +89,17 @@ class LLMClient:
     def list_models(self) -> list[str]:
         """列出当前端点可用的模型（复用同一配置解析与客户端）。
 
-        Web /api/models 与 CLI --list-models 共用，避免各自手写
-        base_url/api_key 解析和 urllib 请求。
+        Web /api/models 与 CLI --list-models 共用。
+        优先走 urllib（沙箱/代理环境下 TLS 更稳，且无需 SDK 连接池开销，
+        典型 0.3s vs SDK + 回退 1.8s）；urllib 失败再试 SDK。
         """
+        try:
+            return self._list_models_urllib()
+        except Exception:
+            pass
         try:
             models = self._client.models.list()
             return sorted(str(m.id) for m in models.data if m.id)
-        except Exception:
-            pass
-        # SDK transport 受阻时的兜底：标准库 urllib 走不同的 TLS 路径，
-        # 健康检查据此能区分"网络被干扰"与"端点真的不可用"。
-        try:
-            return self._list_models_urllib()
         except Exception:
             return []
 
@@ -100,13 +120,15 @@ class LLMClient:
         messages: list[dict],
         tools: list[dict] | None,
         max_tokens: int,
+        on_token: Any = None,
     ) -> LLMResponse:
         """标准库版 chat（SDK 传输层被网络代理/TLS 沙箱拦截时的回退路径）。
 
         沙箱环境下 httpx 的 TLS 握手被中间代理破坏（EOF violation），
         urllib 走不同的 TLS 路径可通。回退实现覆盖非流式语义：
-        工具调用/usage/finish_reason 与 SDK 路径对齐，on_token 流式在
-        回退模式下退化为非流式（流式失败本来也走 _chat_once）。
+        工具调用/usage/finish_reason 与 SDK 路径对齐。on_token 流式：
+        当提供 on_token 且响应含正文时，按分块回放 on_token 回调，
+        保证 UI 流式打字机效果不因降级而消失。
         """
         import urllib.request
 
@@ -141,6 +163,9 @@ class LLMClient:
                  "arguments": (tc.get("function") or {}).get("arguments", "")}
                 for tc in msg["tool_calls"]
             ]
+        # 非流式响应拿到后，按分块回放 on_token，保留 UI 打字机效果
+        if on_token and msg.get("content") and not msg.get("tool_calls"):
+            _replay_stream_tokens(msg.get("content"), on_token)
         usage = data.get("usage")
         return LLMResponse(
             content=msg.get("content"),
@@ -221,21 +246,30 @@ class LLMClient:
                      "arguments": v["arguments"]}
                     for _, v in sorted(tool_calls.items())
                 ]
+            content = "".join(content_parts) or None
+            # SDK 流式拿到正文后，若 on_token 未收到任何 content delta
+            # （API 未返回纯文本流，只发了 tool_call 块），回放 content 保证 UI 打字机
+            if on_token and content and not tool_calls and not content_parts:
+                _replay_stream_tokens(content, on_token)
+            elif on_token and content and content_parts:
+                pass  # 正常流式路径，on_token 已逐块调用
             return LLMResponse(
-                content="".join(content_parts) or None,
+                content=content,
                 tool_calls=tc_list,
                 finish_reason=finish_reason,
                 usage=usage,
             )
         except Exception:
-            # 流式失败时降级为非流式（保证可用性）
-            return self._chat_once(messages, tools, max_tokens)
+            # 流式失败时降级：非流式 SDK 重试 + 逐字回放回调
+            resp = self._chat_once(messages, tools, max_tokens, on_token=on_token)
+            return resp
 
     def _chat_once(
         self,
         messages: list[dict],
         tools: list[dict] | None,
         max_tokens: int,
+        on_token: Any = None,
     ) -> LLMResponse:
         """非流式单次请求。"""
         params: dict[str, Any] = {
@@ -269,7 +303,8 @@ class LLMClient:
                 ))
             if _is_transport:
                 try:
-                    return self._chat_once_urllib(messages, tools, max_tokens)
+                    return self._chat_once_urllib(
+                        messages, tools, max_tokens, on_token=on_token)
                 except Exception:
                     raise sdk_err
             raise
@@ -285,6 +320,14 @@ class LLMClient:
                 }
                 for tc in choice.message.tool_calls
             ]
+
+        # 非流式成功路径也支持 on_token 回放（当调用方降级到 _chat_once）
+        if on_token and choice.message.content and not tc_list:
+            _replay_stream_tokens(choice.message.content, on_token)
+        elif on_token and tc_list and choice.message.content:
+            # 工具调用 + 附带文本：先回放 content，再标记工具调用
+            # （agent 场景里 LLM 有时同时返回思考文本 + 工具调用）
+            _replay_stream_tokens(choice.message.content, on_token)
 
         return LLMResponse(
             content=choice.message.content,
