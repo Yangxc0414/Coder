@@ -1439,6 +1439,8 @@ async function openSession(file) {
   // 响应回来时若用户已点了别的会话 / 已离开历史模式：丢弃过期结果（防串内容）
   if (_loadingSession !== file) return;
   _loadingSession = null;
+  // tab 已关闭或已切走：也不渲染（连点 + 切 tab 的交叉竞态）
+  if (tab.closed || activeTab() !== tab) return;
   if (!resp.ok) {
     const e = await resp.json().catch(() => ({}));
     tab.feedEl.innerHTML = '<div style="color:var(--err);font-size:12px;padding:20px;text-align:center;">' +
