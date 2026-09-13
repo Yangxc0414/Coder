@@ -332,7 +332,7 @@ class Agent:
 
         while self._n_steps < self._max_steps:
             if self._abort_requested:
-                self.trace.record(self._n_steps, "aborted", step=self._n_steps)
+                self.trace.record(self._n_steps, "aborted")
                 logger.info("Aborted by user at step %d", self._n_steps)
                 self.hooks.fire(AGENT_ENDED.with_data(
                     steps=self._n_steps, reason="aborted"))

@@ -186,6 +186,37 @@ class TestAgentE2E:
 
         assert "maximum steps" in ans.lower()
 
+    def test_abort_records_trace_without_error(self, tmp_path: Path) -> None:
+        """协作式停止：request_abort() 后，trace.record('aborted') 必须能正常写入。
+
+        回归：agent.py 曾把 step 同时当位置参数和关键字传进
+        trace.record(step, event, **data)，触发
+        TypeError: record() got multiple values for argument 'step'。
+        该异常会让"停止"操作中途炸掉（前端表现为"意外错误→恢复重试"）。
+        """
+        registry = ToolRegistry()
+        registry.register(ReadFileTool(tmp_path))
+
+        # 让 agent 有若干步可走（每步读文件），再中途请求停止
+        llm = MockLLM([
+            {"tool_calls": [{"id": f"tc{i}", "name": "read_file",
+                             "arguments": '{"path": "x"}'}]}
+            for i in range(1, 30)
+        ])
+
+        agent = Agent(llm_client=llm, registry=registry, workspace=tmp_path)
+        # 用一个 hook 在第 2 步后请求停止（模拟 UI 点"停止"）
+        def _stop_after_turn(e):
+            if agent._n_steps >= 2:
+                agent.request_abort()
+
+        agent.hooks.register("TURN_STOPPED", _stop_after_turn)
+        # 不应抛 TypeError（trace.record 参数冲突）
+        ans = agent.run("Do something")
+        assert "已按用户要求停止" in ans or "stop" in ans.lower()
+        # trace 里确实记了一条 aborted
+        assert any(e["event"] == "aborted" for e in agent.trace.get_entries())
+
     def test_verifier_integration(self, tmp_path: Path) -> None:
         """Verifier runs after agent completes."""
         from coder_agent.verifier import Verifier

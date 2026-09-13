@@ -1,11 +1,32 @@
 # Coder — 零框架自研编码 Agent
 
+> **English / English 速览**
+>
+> **Coder is a fully self-built coding agent with no agent framework.**
+> The whole ReAct loop (Think → Act → Observe) is hand-rolled: context
+> management, tool execution, output parsing, loop termination and error
+> recovery are all implemented from scratch. On top of the base loop it ships
+> **7 mechanism enhancements** (plan-execute-verify orchestration, a failure
+> pattern library with strategy rotation, message grading, automatic memory
+> curation, tool fallback & adaptive tool routing, and planner-template
+> learning) — each toggleable, each unit-tested.
+>
+> - **Deterministic & reproducible** — same task + same LLM + same tools ⇒
+>   bit-identical results. **420+ offline tests** run with no LLM API call.
+> - **Works out of the box** with any OpenAI-compatible gateway
+>   (Agnes / DeepSeek / OpenAI / vLLM).
+> - **Interfaces:** one-shot CLI, interactive REPL, and a FastAPI + SSE web UI
+>   with multi-session tabs, live streaming, and an offline demo record/replay
+>   mode.
+>
+> 📌 中文完整文档（创新点、架构、安装、用法）见下方。
+
 一个**完全自研、不依赖任何 Agent 框架**的编码 Agent，核心是 ReAct 循环
 （Think → Act → Observe）。上下文管理、工具执行、输出解析、循环终止、错误恢复
 等每一块核心逻辑都手写实现。默认模型为 `agnes-3.0-flash`（OpenAI 兼容接口，
 可换 Agnes / DeepSeek / OpenAI / vLLM 等任意网关）。
 
-> **392 个测试全部离线通过**（无需调用 LLM API）；Agent 核心循环完全确定、
+> **420+ 个测试全部离线通过**（无需调用 LLM API）；Agent 核心循环完全确定、
 > 可复现——同任务、同 LLM、同工具环境下可逐位复现结果。
 
 ---
@@ -52,7 +73,7 @@ Agent 核心循环不具备的方法层差异。
 同时有"除零不抛异常"+"整数除法"两个 bug），并**独立进程做地面真值验证**
 （代码行为正确 + `pytest` 全绿）。证明 7 项增强确实带来"效果很好"。
 
-**③ 全量回归**：`tests/` + `coder_agent/` 共 **392 个测试离线通过**，
+**③ 全量回归**：`tests/` + `coder_agent/` 共 420+ 个测试离线通过，
 每项增强各有独立单测。
 
 ---
@@ -209,7 +230,7 @@ hook 事件（AgentStarted / ToolStart / Tool / VerifierResult / Turn / Compress
 ## 六、测试
 
 ```bash
-python -m pytest tests/ -q     # 392 个测试，约 1.5 分钟，无需 API 调用
+python -m pytest tests/ coder_agent/ -q     # 420+ 个测试，约 3 分钟，无需 API 调用
 ```
 
 关键入口：
