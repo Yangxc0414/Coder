@@ -1340,9 +1340,10 @@ async function submitTask(task, tabOverride) {
   }
   // 查看历史会话时发消息 = 续接该会话（resume 管线，历史上下文带入）
   const isHistoryContinue = tab.viewingHistory && tab.sessionFile;
+  const resumePath = isHistoryContinue ? tab.sessionFile : "";  // 先取，清空前保留
   if (isHistoryContinue) {
     continueFromHistory(tab);
-    addTabMsg(tab, "turn", "📜 续接历史会话：" + tab.sessionFile.split(/[\\/]/).pop());
+    addTabMsg(tab, "turn", "📜 续接历史会话：" + resumePath.split(/[\\/]/).pop());
     tab.sessionFile = "";  // 续接后不再重复 resume（新对话追加到该历史之上）
     tab.viewingHistory = false;  // 回到实时视图（feed 保留续接上下文）
   } else {
@@ -1366,7 +1367,7 @@ async function submitTask(task, tabOverride) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       task, mode, model, goal: tab.goal || "",  // 会话级目标
-      resume: isHistoryContinue ? tab.sessionFile : ""
+      resume: resumePath  // 续接路径（清空 tab.sessionFile 前已捕获）
     })
   });
   if (!resp.ok) {
@@ -1445,6 +1446,8 @@ async function openSession(file) {
     return;
   }
   const data = await resp.json();
+  // 响应回来时若 tab 已切走（点了别的会话或关闭了）：丢弃过期结果
+  if (tab.closed || activeTab() !== tab) return;
   tab.viewingHistory = true;
   tab.sessionFile = file;
   tab.sessionData = data;
@@ -1685,7 +1688,7 @@ async function loadSessions() {
       const m = rawTime.match(/^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})/);
       const time = m ? m[2] + "-" + m[3] + " " + m[4] + ":" + m[5] : rawTime;
       // 首条用户消息预览；无用户消息（如 pytest 残留空会话）显示占位
-      const title = s.task && s.task !== "?" && !/^\d{8}_\d{6}(_\d+)?$/.test(s.task) ? s.task : "（无用户消息）";
+      const title = s.task && s.task !== "?" ? s.task : "（无用户消息）";
       div.innerHTML = escHtml(title) +
         '<div class="session-meta"><span>🗂 ' + escHtml(time) + '</span></div>' +
         '<button class="session-del" title="删除会话">🗑</button>';
