@@ -164,11 +164,12 @@
   .md h1, .md h2, .md h3 { margin: 12px 0 8px; color: var(--text); font-weight: 600; }
   .md h1 { font-size: 18px; } .md h2 { font-size: 16px; } .md h3 { font-size: 14px; }
   .md p { margin: 8px 0; line-height: 1.6; }
-  .md pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 10px 0; position: relative; }
-  .md pre code { font-family: Consolas, monospace; font-size: 12px; color: var(--code-text); }
+  .md pre, .turn-answer pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 10px 0; position: relative; }
+  .md pre code, .turn-answer pre code { font-family: Consolas, monospace; font-size: 12px; color: var(--code-text); background: none; padding: 0; border-radius: 0; }
   .md code.inline { background: var(--bg3); border-radius: 4px; padding: 2px 6px; font-family: Consolas, monospace; color: var(--code-text); font-size: 12px; }
-  .md ul, .md ol { margin: 8px 0 8px 20px; }
-  .md li { margin: 4px 0; line-height: 1.5; }
+  .md ul, .md ol, .turn-answer ul, .turn-answer ol { margin: 8px 0 8px 20px; }
+  .md li, .turn-answer li { margin: 3px 0; line-height: 1.5; }
+  .md blockquote, .turn-answer blockquote { margin: 8px 0; padding: 6px 12px; border-left: 3px solid var(--accent); background: var(--bg4); color: var(--muted); border-radius: 0 6px 6px 0; }
   .md-table { border-collapse: collapse; margin: 10px 0; width: 100%; font-size: 12px; }
   .md-table th, .md-table td { border: 1px solid var(--border2); padding: 6px 10px; text-align: left; }
   .md-table th { background: var(--bg3); color: var(--text); font-weight: 600; }
@@ -793,25 +794,7 @@ function renderMarkdown(md) {
               '</code><button class="copy-btn" data-code="' + id + '">复制</button></pre>';
       return;
     }
-    let seg = escHtml(blk);
-    // 表格块：表头行 + 分隔行（|---|）+ 数据行，整体转 <table>
-    seg = seg.replace(
-      /((?:^\|[^\n]+\|\s*\n)+(?:^\|[\s:|-]+\|\s*\n)(?:(?:^\|[^\n]+\|\s*\n)*))/gm,
-      (match) => {
-        const ls = match.trim().split("\n").map(l => l.trim());
-        if (ls.length < 2) return match;
-        if (!/^\|[\s:|-]+\|$/.test(ls[1])) return match;
-        return renderTable(match);
-      }
-    );
-    seg = seg.replace(/`([^`\n]+)`/g, '<code class="inline">$1</code>');
-    seg = seg.replace(/^###\s?(.+)$/gm, "<h3>$1</h3>");
-    seg = seg.replace(/^##\s?(.+)$/gm, "<h2>$1</h2>");
-    seg = seg.replace(/^#\s?(.+)$/gm, "<h1>$1</h1>");
-    seg = seg.replace(/^\s?[-*]\s+(.+)$/gm, "<li>$1</li>");
-    seg = seg.replace(/^(\d+)\.\s+(.+)$/gm, "<li>$2</li>");
-    seg = seg.replace(/(<li>.*?<\/li>)/gs, (m) => m.includes("</ul>") || m.includes("</ol>") ? m : "<ul>" + m + "</ul>");
-    seg = seg.replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+    let seg = mdBlockToHtml(blk);
     html += "<div class='md'>" + seg + "</div>";
   });
   const wrap = document.createElement("div");
@@ -825,6 +808,61 @@ function renderMarkdown(md) {
     };
   });
   return wrap;
+}
+
+/* 单个 Markdown 文本块 → HTML（表格/列表/引用/标题/内联格式） */
+function mdBlockToHtml(blk) {
+  let seg = escHtml(blk);
+  // 表格块：表头行 + 分隔行（|---|）+ 数据行，整体转 <table>
+  seg = seg.replace(
+    /((?:^\|[^\n]+\|\s*\n)+(?:^\|[\s:|-]+\|\s*\n)(?:(?:^\|[^\n]+\|\s*\n)*))/gm,
+    (match) => {
+      const ls = match.trim().split("\n").map(l => l.trim());
+      if (ls.length < 2) return match;
+      if (!/^\|[\s:|-]+\|$/.test(ls[1])) return match;
+      return renderTable(match);
+    }
+  );
+  // 行内代码（在列表/引用转换前转成占位，避免内部 - 被误判为列表项）
+  seg = seg.replace(/`([^`\n]+)`/g, (m, c) => "<code class=\"inline\">" + c + "</code>");
+  // 标题（### 需先于 ##/# 匹配，防止被前缀吞掉）
+  seg = seg.replace(/^###\s+(.+)$/gm, "<h3>$1</h3>");
+  seg = seg.replace(/^##\s+(.+)$/gm, "<h2>$1</h2>");
+  seg = seg.replace(/^#\s+(.+)$/gm, "<h1>$1</h1>");
+  // 列表：逐行转 <li>（带类型标记），再把"紧邻且同类型"的行折叠进一个 <ul>/<ol>
+  seg = seg
+    .replace(/^[ \t]*[-*] +(.+)$/gm, "«U»<li>$1</li>")
+    .replace(/^[ \t]*(\d+)\. +(.+)$/gm, "«O»<li>$2</li>");
+  const out = [];
+  let openList = "";
+  seg.split("\n").forEach((line) => {
+    const m = line.match(/^«([UO])»/);
+    if (m) {
+      const type = m[1] === "U" ? "ul" : "ol";
+      const li = line.slice(2).replace(/^»/, "");
+      if (type === openList) { out.push(li); return; }
+      if (openList) out.push("</" + openList + ">");
+      out.push("<" + type + ">");
+      openList = type;
+      out.push(li);
+    } else {
+      if (openList) { out.push("</" + openList + ">"); openList = ""; }
+      out.push(line);
+    }
+  });
+  if (openList) out.push("</" + openList + ">");
+  seg = out.join("\n");
+  // 引用块：连续的 > 行折叠为一个 blockquote
+  seg = seg.replace(/(?:^|\n)((?:&gt;\s?[^\n]*(?:\n|$))+)/g, (m, bq) => {
+    const inner = bq.replace(/^&gt;\s?/gm, "").replace(/\n/g, "<br>");
+    return "\n<blockquote>" + inner + "</blockquote>";
+  });
+  // 段落分隔：空行 → 段落边界（避免 <h3> 与表格粘连）
+  seg = seg.replace(/\n{3,}/g, "\n\n");
+  // 内联强调（最后做，避免转义进标题/列表内容）
+  seg = seg.replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+  seg = seg.replace(/(^|[^\w*])\*([^*\n]+)\*(?!\*)/g, "$1<i>$2</i>");
+  return seg;
 }
 
 /* ═══════════ Turn 容器（每 tab 独立） ═══════════ */
