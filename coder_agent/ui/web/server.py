@@ -134,14 +134,22 @@ def api_sessions():
             # 提取更多内容作为预览（前 100 字符）
             user_messages = [m.get("content", "") for m in journal["messages"]
                              if m.get("role") == "user"]
-            first_user = (user_messages[0][:100] if user_messages else "?")
-            # 如果有多个用户消息，显示总数
-            task_preview = first_user
-            if len(user_messages) > 1:
-                task_preview += f" ... (+{len(user_messages)-1} more)"
+            # 无用户消息时（如 pytest 空会话）回退到第一条 assistant 回答 / 文件名
+            first_assistant = next(
+                (m.get("content", "") for m in journal["messages"]
+                 if m.get("role") == "assistant" and (m.get("content") or "").strip()),
+                "")
+            if user_messages:
+                task_preview = user_messages[0][:100]
+                if len(user_messages) > 1:
+                    task_preview += f" ... (+{len(user_messages)-1} more)"
+            elif first_assistant:
+                task_preview = "（自动回答）" + first_assistant[:80]
+            else:
+                task_preview = f.name.replace("session_", "").replace(".jsonl", "")
             workspace = (journal.get("meta") or {}).get("workspace")
         except Exception:
-            task_preview = "?"
+            task_preview = f.name
             workspace = None
         out.append({"file": str(f), "name": f.name, "task": task_preview,
                     "workspace": workspace})

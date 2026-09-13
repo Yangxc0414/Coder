@@ -43,7 +43,7 @@
   #pane-files { display: none; }
   .sidebar-content::-webkit-scrollbar { width: 4px; }
   .sidebar-content::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 2px; }
-  .session-item { position: relative; padding: 8px 10px; font-size: 11px; background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; color: var(--muted); cursor: pointer; margin-bottom: 4px; transition: all .15s; word-break: break-all; line-height: 1.4; }
+  .session-item { position: relative; padding: 8px 34px 8px 10px; font-size: 11px; background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; color: var(--muted); cursor: pointer; margin-bottom: 4px; transition: all .15s; word-break: break-all; line-height: 1.4; }
   .session-item:hover, .session-item.active { border-color: var(--accent); color: var(--text); }
   .session-item .session-meta { font-size: 10px; color: var(--faint); margin-top: 2px; display: flex; gap: 8px; }
   .session-item .session-del { display: none; position: absolute; top: 6px; right: 6px; background: none; border: none; color: var(--faint); cursor: pointer; font-size: 12px; padding: 2px 4px; }
@@ -504,6 +504,7 @@ function createTab(title) {
     queue: [],  // 输入队列（运行中提交的任务排队，完成后自动执行）
     turnEl: null, turnStep: null, streamEl: null, pendingEl: null,
     stateInfo: null, endedShown: false,
+    activeRun: null,  // 当前 run 基准：done 事件校验用它防串会话（队列续跑刷新）
     verifierStats: { pass: 0, fail: 0 },
     stats: { tokens: 0, steps: 0, tools: {}, writes: [], reads: [] },
     viewingHistory: false, sessionFile: null, sessionData: null, sessionStats: null,
@@ -564,6 +565,9 @@ function switchTab(id) {
   document.getElementById("f-steps").textContent =
     tab.stateInfo ? tab.stateInfo.step + "/" + (tab.stateInfo.max_steps || 50) : tab.stats.steps;
   document.getElementById("historyBar").style.display = tab.viewingHistory ? "flex" : "none";
+  // 切换时保持历史高亮一致性：历史 tab 标记其条目；实时 tab 清除全部高亮
+  document.querySelectorAll(".session-item").forEach(el =>
+    el.classList.toggle("active", tab.viewingHistory && el.dataset.file === tab.sessionFile));
   updateGoalBadge();  // 切换会话时同步 footer 目标徽章
   updateQueueBar(tab);  // 切换会话时同步输入队列栏
   if (tab.viewingHistory && tab.sessionData) {
@@ -1154,6 +1158,9 @@ function onEvent(ev, tab) {
   } else if (ev.kind === "status") {
     addTabMsg(tab, "turn", ev.message);
   } else if (ev.kind === "done") {
+    // 完成事件必须匹配本 tab 最近一次 run（队列续跑刷新 activeRun）：
+    // 用户已切走/开新会话时，旧 run 的迟到 done 不能误改其他 tab 状态
+    if (tab.activeRun && ev.run_id && ev.run_id !== tab.activeRun) return;
     finalizeStream(tab);
     clearPending(tab);
     setRunning(tab, false);
@@ -1175,7 +1182,12 @@ function onEvent(ev, tab) {
       const next = tab.queue.shift();
       updateQueueBar(tab);
       addTabMsg(tab, "turn", "⏳ 开始执行队列下一项…");
+      // 队列续跑会发起新 run（新 run_id）；刷新 activeRun，
+      // 否则新 run 的 done 事件会被旧 run_id 校验拒绝
+      tab.activeRun = tab.runId;
       setTimeout(() => submitTask(next, tab), 300);
+    } else {
+      tab.activeRun = null;
     }
     loadSessions();
     if (document.getElementById("activityPanel").classList.contains("show")) {
@@ -1292,6 +1304,9 @@ async function submitTask(task, tabOverride) {
   const isHistoryContinue = tab.viewingHistory && tab.sessionFile;
   if (isHistoryContinue) {
     continueFromHistory(tab);
+    addTabMsg(tab, "turn", "📜 续接历史会话：" + tab.sessionFile.split(/[\\/]/).pop());
+    tab.sessionFile = "";  // 续接后不再重复 resume（新对话追加到该历史之上）
+    tab.viewingHistory = false;  // 回到实时视图（feed 保留续接上下文）
   } else {
     const w = tab.feedEl.querySelector("#welcome");
     if (w) w.remove();
@@ -1324,6 +1339,7 @@ async function submitTask(task, tabOverride) {
   }
   const data = await resp.json();
   tab.runId = data.run_id;
+  tab.activeRun = tab.runId;  // 本次 run 基准：完成事件校验用它防串会话
   listenEvents(tab);
 }
 
@@ -1358,17 +1374,11 @@ function handleSubmit() {
 }
 
 /* ═══════════ 历史会话（作用于当前 tab） ═══════════ */
+let _loadingSession = null;  // 当前正在加载的会话文件（并发防护：防止快速连点串内容）
 async function openSession(file) {
-  console.log('[openSession] 收到 file:', file);
   let tab = activeTab();
-  if (!tab) {
-    console.warn('[openSession] 没有活动 tab，尝试创建');
-    tab = createTab();
-  }
-  if (!tab) {
-    console.error('[openSession] 无法创建 tab');
-    return;
-  }
+  if (!tab) tab = createTab();
+  if (!tab) return;
   if (tab.running) {
     // 当前会话正在运行：自动新建 tab 打开历史，不打断运行中的任务
     const newTab = createTab();
@@ -1377,21 +1387,21 @@ async function openSession(file) {
     setTimeout(() => openSession(file), 100);
     return;
   }
+  _loadingSession = file;
+  // 加载中先清旧标记，避免失败时残留上一个会话状态导致误判
+  tab.sessionFile = null; tab.sessionData = null; tab.sessionStats = null;
+  tab.viewingHistory = false;
   // 立即清空并显示加载中（避免上一个会话内容残留）
   tab.feedEl.innerHTML = '<div style="color:var(--faint);font-size:12px;padding:20px;text-align:center;">加载会话中…</div>';
   tab.turnEl = null; tab.turnStep = null; tab.streamEl = null; tab.pendingEl = null;
   tab.stateInfo = null;
 
-  console.log('[openSession] 请求路径:', file);
-  const encodedPath = encodeURIComponent(file);
-  console.log('[openSession] 编码后:', encodedPath);
-
-  const resp = await fetch("/api/session?file=" + encodedPath);
-  console.log('[openSession] 响应状态:', resp.status);
-
+  const resp = await fetch("/api/session?file=" + encodeURIComponent(file));
+  // 响应回来时若用户已点了别的会话 / 已离开历史模式：丢弃过期结果（防串内容）
+  if (_loadingSession !== file) return;
+  _loadingSession = null;
   if (!resp.ok) {
     const e = await resp.json().catch(() => ({}));
-    console.error('[openSession] 加载失败:', e);
     tab.feedEl.innerHTML = '<div style="color:var(--err);font-size:12px;padding:20px;text-align:center;">' +
       escHtml(e.detail || "加载会话失败") + '</div>';
     return;
@@ -1518,10 +1528,11 @@ function closeHistory(tab) {
   tab.sessionStats = null;
   tab.histTurns = null;
   tab.histRendered = 0;
+  _loadingSession = null;
   document.getElementById("historyBar").style.display = "none";
   document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
   tab.feedEl.innerHTML = "";
-  tab.turnEl = null; tab.streamEl = null; tab.pendingEl = null;
+  tab.turnEl = null; tab.turnStep = null; tab.streamEl = null; tab.pendingEl = null;
   renderWelcome(tab);
   addTabMsg(tab, "turn", "已返回实时视图——运行新任务开始新的对话");
 }
@@ -1630,9 +1641,14 @@ async function loadSessions() {
       div.className = "session-item";
       div.dataset.file = s.file;
       const tab = activeTab();
-      if (tab && s.file === tab.sessionFile) div.classList.add("active");
-      const time = s.file.split(/[\\/]/).pop().replace(/\.jsonl$/, "").replace(/^session_/, "");
-      div.innerHTML = escHtml(s.task || "无标题") +
+      if (tab && s.file === tab.sessionFile && tab.viewingHistory) div.classList.add("active");
+      const rawTime = s.file.split(/[\\/]/).pop().replace(/\.jsonl$/, "").replace(/^session_/, "");
+      // 20260912_184334_0 → 09-12 18:43（友好时间戳）
+      const m = rawTime.match(/^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})/);
+      const time = m ? m[2] + "-" + m[3] + " " + m[4] + ":" + m[5] : rawTime;
+      // 首条用户消息预览；无用户消息（如 pytest 残留空会话）显示占位
+      const title = s.task && s.task !== "?" && !/^\d{8}_\d{6}(_\d+)?$/.test(s.task) ? s.task : "（无用户消息）";
+      div.innerHTML = escHtml(title) +
         '<div class="session-meta"><span>🗂 ' + escHtml(time) + '</span></div>' +
         '<button class="session-del" title="删除会话">🗑</button>';
       div.querySelector(".session-del").onclick = async (e) => {

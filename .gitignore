@@ -36,6 +36,8 @@ openhands/
 plandex/
 qwen-code/
 smolagents-src/
+smolagents/
+opencode/
 my-pi-agent/
 swe-agent/
 node_modules/

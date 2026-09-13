@@ -179,7 +179,9 @@ class RunManager:
     def _emit(self, run_id: str, kind: str, **data: Any) -> None:
         session = self._sessions.get(run_id)
         if session is not None:
-            session.events.put({"kind": kind, **data})
+            # 每个事件注入 run_id：前端按 tab.activeRun 校验 done，
+            # 防止队列续跑/切 tab 后旧 run 的迟到 done 误改其他 tab 状态
+            session.events.put({"kind": kind, "run_id": run_id, **data})
 
     # ── Agent 构建（journal 每会话独立）────────────────────────────────
 
