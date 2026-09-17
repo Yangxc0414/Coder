@@ -103,6 +103,16 @@ class ContextManager:
         self.grade_messages = grade_messages
         # 最近一次 build_messages 的压缩统计（UI 展示用；None=尚未调用/无压缩）
         self.last_compression: dict | None = None
+        # ── 反应式压缩（SOTA: OneCode reactive_compact + goose 压缩限次）──
+        # build_messages 已在每次 LLM 调用前做"主动"预算钳制，但 provider 的
+        # 真实计数可能超出我们的估算（tokenizer 不匹配 / 模型实际窗口小于配置）。
+        # 当 provider 真正报 context overflow 时，reactive_compact() 触发一次更
+        # 激进的压缩（按比例下调有效预算）再重试。_reactive_scale 逐次减半、
+        # 下限 25%；压缩次数受 MAX_CONTEXT_ERROR_COMPACTIONS 封顶，防"越压越溢出"
+        # 死循环（goose 的 MAX_CONTEXT_ERROR_COMPACTIONS=2）。
+        self._reactive_scale = 1.0
+        self.reactive_compactions = 0
+        self.MAX_CONTEXT_ERROR_COMPACTIONS = 2
 
     def build_messages(
         self,
@@ -117,9 +127,10 @@ class ContextManager:
         3. Compress older messages into summaries
         4. If still over budget, further truncate summaries
         """
-        # Calculate token budget for conversation (leave room for tools schema)
+        # Calculate token budget for conversation (leave room for tools schema).
+        # 有效预算 = 名义预算 × 反应式压缩比例（provider 报溢出后逐次下调）。
         tool_schema_tokens = self._estimate_tool_schema_tokens(all_messages)
-        budget = max(1000, self.max_tokens - tool_schema_tokens)
+        budget = max(1000, int(self.max_tokens * self._reactive_scale) - tool_schema_tokens)
 
         # Separate system from conversation
         conv_messages = [m for m in all_messages if m.get("role") != "system"]
@@ -192,6 +203,34 @@ class ContextManager:
             "graded": bool(self.grade_messages and compress_count > 0),
         }
         return result
+
+    def reactive_compact(self) -> bool:
+        """Trigger one aggressive compaction pass after a provider context-overflow.
+
+        Halves the effective budget scale (floor 25%) so the *next*
+        ``build_messages()`` drops more history, then the caller retries the
+        LLM call. SOTA alignment: OneCode's ``reactive_compact(error)`` +
+        goose's compaction cap (``MAX_CONTEXT_ERROR_COMPACTIONS=2``).
+
+        Returns True if the cap has NOT been exceeded (safe to retry); False
+        if we've already compacted the max times and the caller should stop
+        instead of entering a compact→overflow death spiral.
+        """
+        if self.reactive_compactions >= self.MAX_CONTEXT_ERROR_COMPACTIONS:
+            return False
+        self.reactive_compactions += 1
+        self._reactive_scale = max(0.25, self._reactive_scale * 0.5)
+        logger.warning(
+            "Reactive compaction #%d: scaling effective budget to %d%% "
+            "(nominal %d tokens)",
+            self.reactive_compactions, int(self._reactive_scale * 100), self.max_tokens,
+        )
+        return True
+
+    def reset_reactive(self) -> None:
+        """Reset reactive-compaction state (call at the start of each run)."""
+        self._reactive_scale = 1.0
+        self.reactive_compactions = 0
 
     def _apply_grading(
         self, recent_msgs: list[dict], budget: int

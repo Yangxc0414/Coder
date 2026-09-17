@@ -134,6 +134,7 @@ class LLMClient:
         当提供 on_token 且响应含正文时，按分块回放 on_token 回调，
         保证 UI 流式打字机效果不因降级而消失。
         """
+        import urllib.error
         import urllib.request
 
         base = (self.base_url or "https://api.openai.com/v1").rstrip("/")
@@ -155,8 +156,20 @@ class LLMClient:
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            data = json.loads(resp.read().decode("utf-8", "replace"))
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+        except urllib.error.HTTPError as he:
+            # 把 API 错误体带上再抛（HTTPError 的 str 只有 "HTTP Error 400:
+            # Bad Request"，丢掉正文里 "maximum context length ..." 这类
+            # 分类依据）——agent 恢复层靠这些标记识别上下文溢出做反应式压缩
+            try:
+                body = he.read().decode("utf-8", "replace")[:2000]
+            except Exception:
+                body = ""
+            raise RuntimeError(
+                f"API HTTP {he.code}: {body or he.reason}"
+            ) from he
         choice = data["choices"][0]
         msg = choice.get("message") or {}
         tc_list = None

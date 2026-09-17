@@ -11,6 +11,8 @@ Strategy matrix:
   FormatError         →  Inject correction prompt, retry
   APIConnectionError  →  Wait and retry (exponential backoff)
   APIRateLimitError   →  Wait and retry (longer delay)
+  ContextOverflow     →  反应式压缩一次后重试（OneCode reactive compaction +
+                         goose 压缩限次：最多 2 次，超限终止防死循环）
   ToolExecutionError  →  Log + continue (tool already returned error)
   PolicyDenial        →  Inject alternative suggestion
   LoopDetected        →  Inject divergence prompt
@@ -38,6 +40,7 @@ class ErrorType(str, Enum):
     FORMAT_ERROR = "format_error"
     API_CONNECTION = "api_connection"
     API_RATE_LIMIT = "api_rate_limit"
+    CONTEXT_OVERFLOW = "context_overflow"
     TOOL_EXECUTION = "tool_execution"
     POLICY_DENIAL = "policy_denial"
     LOOP_DETECTED = "loop_detected"
@@ -71,6 +74,9 @@ class RecoveryStrategy:
         ErrorType.TOOL_EXECUTION: 1,
         ErrorType.POLICY_DENIAL: 1,
         ErrorType.LOOP_DETECTED: 1,
+        # 反应式压缩次数上限由 ContextManager.MAX_CONTEXT_ERROR_COMPACTIONS
+        # 单独封顶（goose 同款 2 次）；这里 =2 与之对齐，超限时直接终止
+        ErrorType.CONTEXT_OVERFLOW: 2,
     }
 
     # Delay before retry (seconds)
@@ -110,6 +116,15 @@ class RecoveryStrategy:
 
         if "format" in exc_type.lower() or "json" in exc_msg:
             return ErrorType.FORMAT_ERROR
+        # 上下文溢出（provider 真实窗口 < 估算预算）必须排在 API_CONNECTION
+        # 之前——部分 provider 的 4xx 报文同时含 "connection"/"request" 字样
+        overflow_markers = (
+            "context length", "context_length", "maximum context",
+            "too many tokens", "prompt is too long", "input is too long",
+            "exceeds the model", "tokens requested", "context window",
+        )
+        if any(m in exc_msg for m in overflow_markers):
+            return ErrorType.CONTEXT_OVERFLOW
         # httpx/httpcore connection errors
         if ("connect" in exc_type.lower() or "eof" in exc_msg or
                 "connection" in exc_msg or
@@ -185,6 +200,39 @@ class RecoveryStrategy:
             recovered=True,
             action="api_rate_limit_retry",
             message=None,
+        )
+
+    def _handle_context_overflow(
+        self, error: Exception, agent: "Agent", count: int, max_retries: int
+    ) -> RecoveryResult:
+        """Provider context overflow → 反应式压缩一次再重试。
+
+        SOTA 对齐：OneCode ``reactive_compact(error)``（provider 报错才触发，
+        不等主动预算）+ goose 压缩限次（``MAX_CONTEXT_ERROR_COMPACTIONS=2``）。
+        压缩上限由 ContextManager 单独封顶，超限即终止，防止"越压缩越溢出"
+        的死循环。
+        """
+        ctx = getattr(agent, "context", None)
+        reactive = getattr(ctx, "reactive_compact", None)
+        if reactive is not None and reactive():
+            return RecoveryResult(
+                recovered=True,
+                action="context_reactive_compact",
+                message=(
+                    "The model's context window overflowed, so the "
+                    "conversation was reactively compacted. Continue from "
+                    "where you left off — be concise, and do NOT re-read "
+                    "files whose contents you already have."
+                ),
+            )
+        return RecoveryResult(
+            recovered=False,
+            action="max_context_compactions",
+            message=(
+                "Context window overflowed and reactive compaction has "
+                f"reached its cap ({max_retries} compactions). Stopping to "
+                "avoid an infinite compact→overflow loop."
+            ),
         )
 
     def _handle_policy_denial(

@@ -114,7 +114,11 @@ class WriteFileTool(Tool):
     description = (
         "Write content to a file in the workspace. "
         "Creates the file if it doesn't exist, overwrites if it does. "
-        "Creates parent directories as needed."
+        "Creates parent directories as needed. "
+        "For .py / .json files a cheap deterministic check (ast.parse / "
+        "json.loads) runs automatically right after the write and its "
+        "verdict is appended to the result — if it reports a syntax error, "
+        "fix the file before moving on."
     )
     parameters = {
         "type": "object",
@@ -145,9 +149,18 @@ class WriteFileTool(Tool):
                     output=f"[DRY RUN] Would write {len(args['content'])} chars to {resolved}"
                 )
             resolved.write_text(args["content"], encoding="utf-8")
-            return ToolResult(
-                output=f"Written {len(args['content'])} characters to {resolved.name}"
-            )
+            base = f"Written {len(args['content'])} characters to {resolved.name}"
+            # Post-edit verification loop (SOTA: aider linter feedback /
+            # opencode LSP-diagnostics-into-tool-result). A cheap,
+            # deterministic check runs immediately so the model fixes broken
+            # Python/JSON in the SAME step instead of at the slow LLM-verifier
+            # stage. Non-checked file types return None (no verdict appended).
+            from .postcheck import post_edit_check
+
+            verdict = post_edit_check(resolved, args["content"])
+            if verdict:
+                return ToolResult(output=base + "\n[post-edit check] " + verdict)
+            return ToolResult(output=base)
         except Exception as e:
             return ToolResult(error=f"write_file failed: {e}")
 

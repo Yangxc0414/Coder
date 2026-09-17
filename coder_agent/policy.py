@@ -20,11 +20,18 @@ if TYPE_CHECKING:
 
 @dataclass
 class PolicyResult:
-    """Result of a policy check."""
+    """Result of a policy check.
+
+    SOTA alignment (OneCode guard ``to_tool_error``): a denial is not a bare
+    error string — it carries WHY (reason) and a concrete alternative
+    (suggestion), so the model can route around the denial instead of
+    retrying into the same wall.
+    """
 
     approved: bool
     reason: str = ""
     needs_log: bool = False
+    suggestion: str = ""
 
 
 class PolicyGate:
@@ -56,6 +63,31 @@ class PolicyGate:
     # `sudo cat /etc/shadow` pass the gate layer. Never re-duplicate.
     DANGEROUS_COMMAND_PATTERNS = frozenset(RunCommandTool.DANGEROUS_PATTERNS)
 
+    # 结构化拒绝载荷（SOTA: OneCode guard to_tool_error）：每类拒绝自带
+    # 一条可执行的替代路径建议，模型拿到后能绕行而不是反复撞墙重试。
+    SUGGESTION_DANGEROUS_CMD = (
+        "Pick a non-destructive equivalent (read instead of delete, avoid "
+        "sudo/format/force flags). If the destructive action is truly "
+        "required, stop and ask the user first — do not retry the blocked "
+        "command with different casing or quoting."
+    )
+    SUGGESTION_PLAN_MODE = (
+        "Plan mode is read-only: investigate with read_file / search_text / "
+        "list_files and end with the plan as your final answer. The user "
+        "can re-run in goal/full mode to apply the change."
+    )
+    SUGGESTION_UNKNOWN_TOOL = (
+        "This tool name is not registered. Use one of the available tools "
+        "(see the tool list in the system prompt); do not invent tool names."
+    )
+
+    def _deny_dangerous(self, pattern: str) -> "PolicyResult":
+        return PolicyResult(
+            approved=False,
+            reason=f"Dangerous command blocked: contains '{pattern}'",
+            suggestion=self.SUGGESTION_DANGEROUS_CMD,
+        )
+
     def check(
         self,
         tool_name: str,
@@ -81,10 +113,7 @@ class PolicyGate:
                 cmd = args.get("command", "")
                 for pattern in self.DANGEROUS_COMMAND_PATTERNS:
                     if pattern.lower() in cmd.lower():
-                        return PolicyResult(
-                            approved=False,
-                            reason=f"Dangerous command blocked: contains '{pattern}'",
-                        )
+                        return self._deny_dangerous(pattern)
                 return PolicyResult(approved=True, needs_log=True)
             return PolicyResult(approved=True)  # Full mode: allow unknown tools too
 
@@ -96,6 +125,7 @@ class PolicyGate:
             return PolicyResult(
                 approved=False,
                 reason=f"Plan mode is read-only: '{tool_name}' is not a read-only operation",
+                suggestion=self.SUGGESTION_PLAN_MODE,
             )
 
         # GOAL mode (default): normal policy
@@ -109,14 +139,12 @@ class PolicyGate:
             cmd = args.get("command", "")
             for pattern in self.DANGEROUS_COMMAND_PATTERNS:
                 if pattern.lower() in cmd.lower():
-                    return PolicyResult(
-                        approved=False,
-                        reason=f"Dangerous command blocked: contains '{pattern}'",
-                    )
+                    return self._deny_dangerous(pattern)
             return PolicyResult(approved=True, needs_log=True)
 
         # Unknown tool — deny
         return PolicyResult(
             approved=False,
             reason=f"Unknown or unregistered tool: '{tool_name}'",
+            suggestion=self.SUGGESTION_UNKNOWN_TOOL,
         )

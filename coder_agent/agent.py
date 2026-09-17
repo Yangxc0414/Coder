@@ -322,6 +322,8 @@ class Agent:
         self._verify_snapshot: int = 0
         self._active_failure_fp = None  # 失败指纹跨 run 不串（库本身跨会话保留）
         self._tool_fallback.reset()  # 工具失败连败计数跨 run 清零
+        # 反应式压缩状态跨 run 清零（压缩限次熔断 per-run 计数）
+        self.context.reset_reactive()
         if self._progress_tracker:
             self._progress_tracker.problem = task
 
@@ -827,8 +829,18 @@ class Agent:
             parsed.tool_name, parsed.arguments, mode=self.mode
         )
         if not policy_result.approved:
-            result = ToolResult(error=f"Policy denied: {policy_result.reason}")
-            logger.warning("[POLICY DENIED] %s: %s", parsed.tool_name, policy_result.reason)
+            # 结构化拒绝载荷（SOTA: OneCode guard to_tool_error）：把"为什么被拒"
+            # 和"可以改走哪条路"一起告诉模型，避免它反复换参数撞同一堵墙。
+            denial = f"Policy denied: {policy_result.reason}"
+            # getattr 兜底：测试/宿主可能注入无 suggestion 字段的鸭子类型 PolicyResult
+            if getattr(policy_result, "suggestion", ""):
+                denial += (
+                    f" | Suggested alternative: {policy_result.suggestion}"
+                )
+            result = ToolResult(error=denial)
+            logger.warning(
+                "[POLICY DENIED] %s: %s", parsed.tool_name, policy_result.reason
+            )
         else:
             result = tool.execute(parsed.arguments)
             if policy_result.needs_log:

@@ -12,7 +12,7 @@
 > learning) — each toggleable, each unit-tested.
 >
 > - **Deterministic & reproducible** — same task + same LLM + same tools ⇒
->   bit-identical results. **420+ offline tests** run with no LLM API call.
+>   bit-identical results. **440+ offline tests** run with no LLM API call.
 > - **Works out of the box** with any OpenAI-compatible gateway
 >   (Agnes / DeepSeek / OpenAI / vLLM).
 > - **Interfaces:** one-shot CLI, interactive REPL, and a FastAPI + SSE web UI
@@ -26,7 +26,7 @@
 等每一块核心逻辑都手写实现。默认模型为 `agnes-3.0-flash`（OpenAI 兼容接口，
 可换 Agnes / DeepSeek / OpenAI / vLLM 等任意网关）。
 
-> **420+ 个测试全部离线通过**（无需调用 LLM API）；Agent 核心循环完全确定、
+> **440+ 个测试全部离线通过**（无需调用 LLM API）；Agent 核心循环完全确定、
 > 可复现——同任务、同 LLM、同工具环境下可逐位复现结果。
 
 ---
@@ -73,7 +73,7 @@ Agent 核心循环不具备的方法层差异。
 同时有"除零不抛异常"+"整数除法"两个 bug），并**独立进程做地面真值验证**
 （代码行为正确 + `pytest` 全绿）。证明 7 项增强确实带来"效果很好"。
 
-**③ 全量回归**：`tests/` + `coder_agent/` 共 420+ 个测试离线通过，
+**③ 全量回归**：`tests/` + `coder_agent/` 共 440+ 个测试离线通过，
 每项增强各有独立单测。
 
 ---
@@ -227,10 +227,31 @@ hook 事件（AgentStarted / ToolStart / Tool / VerifierResult / Turn / Compress
 
 ---
 
-## 六、测试
+## 六、SOTA 对照与机制吸收
+
+对 8 个开源编码 Agent（aider / mini-swe-agent / OpenHands / Cline / goose /
+opencode / smolagents / OneCode）做了逐仓机制调研，**只吸收"低成本 + 高价值 +
+可离线验证"的机制**，不照搬架构。本轮落地 3 项（均有回归测试）：
+
+| 吸收的机制 | 来源 | 落在哪 | 解决了什么 |
+|---|---|---|---|
+| **编辑后校验环**（写文件立即跑廉价确定性校验，结论拼回工具输出） | aider `linter.py` / opencode LSP 诊断进 tool_result | `tools/postcheck.py` + `WriteFileTool` | 模型写坏 Python/JSON 时**同一步**就能看见语法错误并自修，而不是等到慢速 LLM Verifier 才知道 |
+| **上下文溢出反应式压缩 + 压缩限次熔断** | OneCode `reactive_compact` / goose `MAX_CONTEXT_ERROR_COMPACTIONS=2` | `context.py` `reactive_compact()` + `recovery.py` `CONTEXT_OVERFLOW` | provider 真实窗口 < 估算预算时，溢出不再直接崩：先反应式压缩重试，封顶 2 次防"越压越溢出"死循环 |
+| **结构化策略拒绝载荷**（拒绝带 reason + 具体替代路径） | OneCode guard `to_tool_error` | `policy.py` `suggestion` + `agent.py` 拒绝消息 | 模型被拒后能绕行（换工具/换模式/先读再写），而不是反复换参数撞同一堵墙 |
+
+**明确不吸收**（及理由）：Code-as-Action 动作空间（smolagents，需整套
+executor 沙箱，与零框架可审计目标冲突）、RepoMap tree-sitter 符号图
+（aider，依赖重、与既有"自适应工具 schema 路由"解决同一问题）、全服务端
+事件化（opencode，本项目的 SSE Web UI 已覆盖等价能力）。
+
+回归证据：`tests/test_sota_improvements.py`（18 项，离线确定性）。
+
+---
+
+## 七、测试
 
 ```bash
-python -m pytest tests/ coder_agent/ -q     # 420+ 个测试，约 3 分钟，无需 API 调用
+python -m pytest tests/ coder_agent/ -q     # 440+ 个测试，约 3 分钟，无需 API 调用
 ```
 
 关键入口：
@@ -238,3 +259,4 @@ python -m pytest tests/ coder_agent/ -q     # 420+ 个测试，约 3 分钟，�
 - `tests/cross_agent_report.md` —— 对照量化报告（自动生成）
 - `tests/e2e_full_enhanced_bugfix.py` —— 全增强端到端真实任务基准
 - `tests/test_e2e.py` —— 基础 ReAct 闭环端到端
+- `tests/test_sota_improvements.py` —— 三项 SOTA 机制吸收的回归
